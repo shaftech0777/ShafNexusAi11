@@ -1,0 +1,64 @@
+{
+  "tables": {
+    "users": [
+      {
+        "id": 1,
+        "email": "admin@nexus.ai",
+        "role": "developer",
+        "created_at": "2026-06-14T11:18:03.849Z"
+      },
+      {
+        "id": 2,
+        "email": "shaftech0777@gmail.com",
+        "role": "owner",
+        "created_at": "2026-06-14T11:18:03.849Z"
+      },
+      {
+        "id": 3,
+        "email": "john.doe@gmail.com",
+        "role": "developer",
+        "created_at": "2026-06-14T11:18:03.849Z"
+      },
+      {
+        "id": 4,
+        "email": "test_user@gmail.com",
+        "role": "analyst",
+        "created_at": "2026-06-14T11:18:03.850Z"
+      }
+    ],
+    "system_logs": [
+      {
+        "id": 1,
+        "event_type": "SYSTEM",
+        "message": "Decentralized middleware node spawned successfully.",
+        "severity": "info",
+        "logged_at": "2026-06-14T11:18:03.849Z"
+      },
+      {
+        "id": 2,
+        "event_type": "DATABASE",
+        "message": "Loaded relational backups from regional storage.",
+        "severity": "success",
+        "logged_at": "2026-06-14T11:18:03.849Z"
+      }
+    ],
+    "projects": [
+      {
+        "id": 1,
+        "name": "Nexus Replicator",
+        "repo_url": "github.com/shaftech/nexus-replicator",
+        "status": "active",
+        "deploy_provider": "Vercel",
+        "last_updated": "2026-06-14T11:18:03.849Z"
+      },
+      {
+        "id": 2,
+        "name": "Smart Auto API",
+        "repo_url": "github.com/shaftech/smart-auto-api",
+        "status": "idle",
+        "deploy_provider": "Netlify",
+        "last_updated": "2026-06-14T11:18:03.849Z"
+      }
+    ]
+  }
+}
