@@ -61,6 +61,18 @@ export interface SystemMetrics {
   networkOut: string;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  is_active: boolean;
+  is_archived: boolean;
+  is_favorited: boolean;
+  is_default?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
