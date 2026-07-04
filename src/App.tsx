@@ -513,7 +513,7 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
     // Detect if we are running in active browser. If so, auto-save and use this origin!
     const origin = window.location.origin;
-    if (origin.includes("run.app") && !origin.includes("localhost")) {
+    if (!origin.includes("localhost") && !origin.includes("127.0.0.1") && !origin.startsWith("file://")) {
       localStorage.setItem("NEXUS_API_BASE_URL", origin);
       return origin;
     }
@@ -558,7 +558,7 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     // Fallback: If we are running on a mobile host (capacitor, file, localhost for standard mobile layout),
     // detect and fallback to the detected production server URL or window.location.origin.
     const origin = window.location.origin;
-    if (origin.includes("run.app") && !origin.includes("localhost")) {
+    if (!origin.includes("localhost") && !origin.includes("127.0.0.1") && !origin.startsWith("file://")) {
       return `${origin}${relativePath}`;
     }
     
@@ -886,6 +886,17 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
           .from("projects")
           .update({ is_active: true })
           .eq("id", projectId);
+
+        // Switch the active project context on the Express backend as well!
+        try {
+          await apiFetch(getApiUrl("/api/projects/switch"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectId })
+          });
+        } catch (switchDiskErr) {
+          console.warn("Express backend project switch sync failed:", switchDiskErr);
+        }
 
         setCurrentProjectId(projectId);
         localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", projectId);
@@ -1259,6 +1270,15 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
           
           setFiles(mapped);
 
+          // Synchronize files to Express server's workspace disk for co-hosted services (preview, terminal, AI prompt context)
+          apiFetch(getApiUrl("/api/workspace/sync"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ files: mapped })
+          }).catch(syncDiskErr => {
+            console.warn("Disk synchronization failed:", syncDiskErr);
+          });
+
           if (preserveActive && activeFile) {
             const stillExists = mapped.find((f: any) => f.path === activeFile.path);
             if (stillExists) {
@@ -1453,7 +1473,9 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     let src = htmlFile.content;
 
     // Inject default white background and dark text styling if not overridden by custom project styles
+    const baseHref = `<base href="${getApiUrl(`/api/workspace/preview/${currentProjectId}/`)}">`;
     const defaultPreviewStyle = `
+  ${baseHref}
   <style id="shaf-preview-defaults">
     html, body {
       background-color: #ffffff;
@@ -1526,6 +1548,17 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
         if (error) throw error;
 
+        // Synchronize with the Express backend disk so preview and sub-resources work instantly!
+        try {
+          await apiFetch(getApiUrl("/api/workspace/files"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path, content: codeToSave })
+          });
+        } catch (syncErr) {
+          console.warn("Express backend file sync failed:", syncErr);
+        }
+
         setFiles(prev => prev.map(f => f.path === path ? { ...f, content: codeToSave } : f));
         return true;
       } else {
@@ -1593,6 +1626,17 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
           });
 
         if (error) throw error;
+
+        // Synchronize with the Express backend disk so the file or folder exists physically!
+        try {
+          await apiFetch(getApiUrl("/api/workspace/files"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: pathValue, content: content, isFolder })
+          });
+        } catch (syncErr) {
+          console.warn("Express backend file sync failed:", syncErr);
+        }
 
         showToast(isFolder ? `Created folder structure: ${createFileName.trim()}` : `Created virtual file: ${pathValue}`, "success");
         setCreateFileName("");
@@ -1672,6 +1716,17 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
             .eq("path", itemPath);
 
           if (error) throw error;
+        }
+
+        // Synchronize with the Express backend disk so the files are deleted physically!
+        try {
+          await apiFetch(getApiUrl("/api/workspace/files"), {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paths: itemsToDelete })
+          });
+        } catch (syncErr) {
+          console.warn("Express backend file deletion sync failed:", syncErr);
         }
 
         showToast(`Successfully deleted items`, "success");
@@ -5626,7 +5681,7 @@ ON CONFLICT (email) DO NOTHING;`;
                   <div className="w-2 h-2 rounded-full bg-green-400"></div>
                 </div>
                 <div className="bg-[#16181D] px-4 py-0.5 rounded text-[8px] w-2/3 text-center truncate text-gray-400 select-all font-sans border border-[#2D3039]">
-                  localhost:3000
+                  {apiBaseUrl ? apiBaseUrl.replace(/^https?:\/\//, "") : "localhost:3000"}/preview/{currentProjectId}/index.html
                 </div>
                 <button 
                   onClick={() => {

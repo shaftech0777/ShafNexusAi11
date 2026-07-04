@@ -1054,7 +1054,48 @@ async function startServer() {
     }
   });
 
+  app.post("/api/workspace/sync", (req, res) => {
+    try {
+      const { files } = req.body;
+      const projectId = getProjId(req);
+      const dir = getWorkspaceDir(projectId);
+
+      if (!files || !Array.isArray(files)) {
+        return res.status(400).json({ error: "Invalid files array provided" });
+      }
+
+      fs.mkdirSync(dir, { recursive: true });
+
+      for (const file of files) {
+        if (file.path && !file.path.includes("..") && !path.isAbsolute(file.path)) {
+          const fullPath = path.join(dir, file.path);
+          ensureDirectoryExistence(fullPath);
+          fs.writeFileSync(fullPath, file.content || "", "utf8");
+        }
+      }
+
+      res.json({ success: true, message: `Synchronized ${files.length} files to disk` });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to sync files to disk", details: err.message });
+    }
+  });
+
   // 1b. REAL PREVIEW ENDPOINT
+  app.get("/api/workspace/preview/:projectId/*", (req, res) => {
+    let relPath = req.params[0] || "index.html";
+    if (relPath.endsWith("/")) {
+      relPath += "index.html";
+    }
+    const projectId = req.params.projectId || activeProjectId;
+    const dir = getWorkspaceDir(projectId);
+    const fullPath = path.join(dir, relPath);
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+      res.sendFile(fullPath);
+    } else {
+      res.status(404).send(`Error 404: Resource path not found in developer workspace filesystem: ${relPath}`);
+    }
+  });
+
   app.get("/api/workspace/preview/*", (req, res) => {
     let relPath = req.params[0] || "index.html";
     if (relPath.endsWith("/")) {
