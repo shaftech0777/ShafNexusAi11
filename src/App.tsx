@@ -19,9 +19,12 @@ import {
   Lock, 
   User, 
   Key, 
+  Link,
   Check, 
   AlertCircle, 
-  ExternalLink, 
+  ExternalLink,
+  LogOut,
+  Layers, 
   FileText, 
   Search, 
   Code, 
@@ -65,6 +68,7 @@ import {
   Project
 } from "./types";
 import { supabase, isSupabaseConfigured } from "./lib/supabaseClient";
+import { AIAgentStudio } from "./components/AIAgentStudio";
 import { 
   maskKey, 
   getActiveProvider, 
@@ -162,22 +166,43 @@ export default function App() {
 
   // GitHub Real Connection States
   const [githubToken, setGithubToken] = useState<string>(() => localStorage.getItem("github_token") || "");
-  const [githubRepo, setGithubRepo] = useState<string>(() => localStorage.getItem("github_repo") || "shaftech/nexus-middleware");
+  const [githubRepo, setGithubRepo] = useState<string>(() => localStorage.getItem("github_repo") || "your-github-account/your-project");
   const [githubBranch, setGithubBranch] = useState<string>(() => localStorage.getItem("github_branch") || "main");
 
   // Vercel Real Connection States
   const [vercelToken, setVercelToken] = useState<string>(() => localStorage.getItem("vercel_token") || "");
 
+  // Netlify Real Connection States
+  const [netlifyToken, setNetlifyToken] = useState<string>(() => localStorage.getItem("netlify_token") || "");
+
+  // Cloudflare Pages States
+  const [cloudflareToken, setCloudflareToken] = useState<string>(() => localStorage.getItem("cloudflare_token") || "");
+  const [cloudflareAccountId, setCloudflareAccountId] = useState<string>(() => localStorage.getItem("cloudflare_account_id") || "");
+
+  // GitHub Pages States
+  const [githubPagesToken, setGithubPagesToken] = useState<string>(() => localStorage.getItem("github_pages_token") || "");
+
+  // Custom Deployment Environment Variables
+  const [deploymentEnvVars, setDeploymentEnvVars] = useState<{ key: string; value: string }[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("deployment_env_vars") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [newEnvKey, setNewEnvKey] = useState<string>("");
+  const [newEnvVal, setNewEnvVal] = useState<string>("");
+
   // Database Real Connection States
-  const [postgresConnectionString, setPostgresConnectionString] = useState<string>(() => localStorage.getItem("postgres_conn_string") || "postgresql://postgres.rgckgffhihgqnhwiocgh:[YOUR_PASSWORD]@aws-0-us-east-1.pooler.supabase.com:5432/postgres");
+  const [postgresConnectionString, setPostgresConnectionString] = useState<string>(() => localStorage.getItem("postgres_conn_string") || "postgresql://user:password@your-database-host:5432/postgres");
   const [activeDbProvider, setActiveDbProvider] = useState<string>(() => localStorage.getItem("active_db_provider") || "supabase");
 
   // Direct Supabase REST SDK States
-  const [supabaseUrl, setSupabaseUrl] = useState<string>(() => localStorage.getItem("supabase_url") || "https://rgckgffhihgqnhwiocgh.supabase.co");
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(() => localStorage.getItem("supabase_anon_key") || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnY2tnZmZoaWhncW5od2lvY2doIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0OTQ3MDIsImV4cCI6MjA5NzA3MDcwMn0.WHCtpezypJ5dy6iX5c9pjmTsJC3DkC1dpf0AtNXI0pU");
-  const [supabaseSecretKey, setSupabaseSecretKey] = useState<string>(() => localStorage.getItem("supabase_secret_key") || "sb_publishable_s6Edo-aSvb_fnezdAgi_-g_Pkl-B2pG");
+  const [supabaseUrl, setSupabaseUrl] = useState<string>(() => localStorage.getItem("supabase_url") || "https://your-project.supabase.co");
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState<string>(() => localStorage.getItem("supabase_anon_key") || "your-supabase-anon-key");
+  const [supabaseSecretKey, setSupabaseSecretKey] = useState<string>(() => localStorage.getItem("supabase_secret_key") || "your-supabase-service-role-key");
   const [supabaseTargetTable, setSupabaseTargetTable] = useState<string>("users");
-  const [supabasePayload, setSupabasePayload] = useState<string>('{\n  "name": "Shaf Dev",\n  "email": "shaftech0777@gmail.com",\n  "role": "Lead Architect"\n}');
+  const [supabasePayload, setSupabasePayload] = useState<string>('{\n  "name": "Lead Developer",\n  "email": "user@example.com",\n  "role": "Lead Architect"\n}');
 
   const [isCloning, setIsCloning] = useState<boolean>(false);
 
@@ -200,7 +225,9 @@ export default function App() {
   });
   
   // Isolated Project ID Ref to prevent asynchronous state races
-  const currentProjectIdRef = useRef<string>("");
+  const currentProjectIdRef = useRef<string>(
+    typeof window !== "undefined" ? localStorage.getItem("NEXUS_CURRENT_PROJECT_ID") || "default" : "default"
+  );
   
   // File Clipboard for copy, cut, paste, duplicate operations
   const [fileClipboard, setFileClipboard] = useState<{ path: string; action: "copy" | "cut" } | null>(null);
@@ -244,7 +271,7 @@ export default function App() {
     {
       id: "m-1",
       role: "assistant",
-      content: `### Welcome to Shaf Nexus AI Assistant! 👋
+      content: `### Welcome to Nexus AI Assistant! 👋
 
 I have configured my core persona to **Senior Full Stack Engineer** for your workspace. 
 Here is what we can accomplish from here:
@@ -258,7 +285,7 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   ]);
   const [chatInput, setChatInput] = useState<string>("");
   const [isAiResponding, setIsAiResponding] = useState<boolean>(false);
-  const [showShafInfo, setShowShafInfo] = useState<boolean>(false);
+  const [showUserInfo, setShowUserInfo] = useState<boolean>(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -351,7 +378,7 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
           {
             id: "m-1",
             role: "assistant",
-            content: `### Welcome to Shaf Nexus AI Assistant! 👋\n\nI have configured my core persona to **Senior Full Stack Engineer** for your workspace.\n\nNow supporting multiple state-of-the-art AI providers! Open the **Settings Panel** (Gears icon at the bottom left) and add your keys to chat securely with: \n* **Google Gemini**\n* **OpenAI**\n* **OpenRouter**\n* **Anthropic Claude**\n* **DeepSeek**`,
+            content: `### Welcome to Nexus AI Assistant! 👋\n\nI have configured my core persona to **Senior Full Stack Engineer** for your workspace.\n\nNow supporting multiple state-of-the-art AI providers! Open the **Settings Panel** (Gears icon at the bottom left) and add your keys to chat securely with: \n* **Google Gemini**\n* **OpenAI**\n* **OpenRouter**\n* **Anthropic Claude**\n* **DeepSeek**`,
             timestamp: "12:00"
           }
         ]);
@@ -509,16 +536,23 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   // API Bridge host configuration for local/Android Capacitor builds
   const [apiBaseUrl, setApiBaseUrl] = useState<string>(() => {
     const saved = localStorage.getItem("NEXUS_API_BASE_URL");
-    if (saved) return saved;
-
-    // Detect if we are running in active browser. If so, auto-save and use this origin!
     const origin = window.location.origin;
-    if (!origin.includes("localhost") && !origin.includes("127.0.0.1") && !origin.startsWith("file://")) {
+    const isLocal = origin.includes("localhost") || origin.includes("127.0.0.1") || origin.startsWith("file://");
+    const isCloudRun = origin.includes(".run.app");
+
+    // Clean up or clear stale Vercel or non-CloudRun URLs from localstorage to avoid 404s
+    if (saved && (saved.includes(".vercel.app") || (!saved.includes(".run.app") && !saved.includes("localhost") && !saved.includes("127.0.0.1")))) {
+      localStorage.removeItem("NEXUS_API_BASE_URL");
+    } else if (saved) {
+      return saved;
+    }
+
+    if (isCloudRun) {
       localStorage.setItem("NEXUS_API_BASE_URL", origin);
       return origin;
     }
     
-    // Default APK fallback is the public Preproduction Shared applet URL
+    // Default APK and Vercel fallback is the public Preproduction Shared applet URL
     return "https://ais-pre-sqqy4sg34umt2wrzutdr6u-991448208937.asia-southeast1.run.app";
   });
 
@@ -533,7 +567,7 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   // Project Management States
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string>(() => {
-    return localStorage.getItem("NEXUS_CURRENT_PROJECT_ID") || "default";
+    return localStorage.getItem("NEXUS_CURRENT_PROJECT_ID") || "";
   });
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState<boolean>(false);
@@ -547,22 +581,50 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   const [projectSearch, setProjectSearch] = useState<string>("");
   const [projectSortBy, setProjectSortBy] = useState<"name" | "date" | "favorite">("date");
 
+  // Project Context Menu state
+  const [projectContextMenu, setProjectContextMenu] = useState<{
+    x: number;
+    y: number;
+    project: Project;
+  } | null>(null);
+
+  // File Context Menu state
+  const [fileContextMenu, setFileContextMenu] = useState<{
+    x: number;
+    y: number;
+    path: string;
+    isDir: boolean;
+  } | null>(null);
+
+  // Close context menus on click anywhere
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      setProjectContextMenu(null);
+      setFileContextMenu(null);
+    };
+    window.addEventListener("click", handleGlobalClick);
+    window.addEventListener("contextmenu", handleGlobalClick);
+    return () => {
+      window.removeEventListener("click", handleGlobalClick);
+      window.removeEventListener("contextmenu", handleGlobalClick);
+    };
+  }, []);
+
   const getApiUrl = (relativePath: string) => {
     if (!relativePath.startsWith("/")) {
       relativePath = "/" + relativePath;
     }
-    // If a custom API base URL is specified in settings, use it!
-    if (apiBaseUrl) {
+    // For standard co-hosted web environments, relative paths are 100% robust and prevent CORS/offline errors
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (origin && !origin.startsWith("file://")) {
+      return relativePath;
+    }
+    // If a custom API base URL is specified in settings and is not Vercel, use it!
+    if (apiBaseUrl && !apiBaseUrl.includes(".vercel.app") && (apiBaseUrl.includes(".run.app") || apiBaseUrl.includes("localhost") || apiBaseUrl.includes("127.0.0.1"))) {
       return `${apiBaseUrl.replace(/\/+$/, "")}${relativePath}`;
     }
-    // Fallback: If we are running on a mobile host (capacitor, file, localhost for standard mobile layout),
-    // detect and fallback to the detected production server URL or window.location.origin.
-    const origin = window.location.origin;
-    if (!origin.includes("localhost") && !origin.includes("127.0.0.1") && !origin.startsWith("file://")) {
-      return `${origin}${relativePath}`;
-    }
-    
-    return `https://ais-pre-sqqy4sg34umt2wrzutdr6u-991448208937.asia-southeast1.run.app${relativePath}`;
+    return relativePath;
   };
 
   const apiFetch = async (url: string | URL, options: RequestInit = {}) => {
@@ -570,6 +632,23 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     const pId = currentProjectIdRef.current || currentProjectId;
     if (pId) {
       headers.set("X-Project-Id", pId);
+    }
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          headers.set("Authorization", `Bearer ${session.access_token}`);
+          if (session.user) {
+            headers.set("X-User-Id", session.user.id);
+            headers.set("X-User-Email", session.user.email || "");
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to retrieve Supabase session for apiFetch headers:", e);
+      }
+    } else if (currentUser) {
+      headers.set("X-User-Id", currentUser.id);
+      headers.set("X-User-Email", currentUser.email || "");
     }
     return fetch(url, { ...options, headers });
   };
@@ -581,6 +660,16 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   const [isPushing, setIsPushing] = useState<boolean>(false);
   const [isCommitting, setIsCommitting] = useState<boolean>(false);
 
+  // New Project Import States
+  const [createProjectTab, setCreateProjectTab] = useState<"new" | "zip" | "github">("new");
+  const [importZipFile, setImportZipFile] = useState<File | null>(null);
+  const [importZipError, setImportZipError] = useState<string | null>(null);
+  const [isImportingZip, setIsImportingZip] = useState<boolean>(false);
+  const [githubSearchQuery, setGithubSearchQuery] = useState<string>("");
+  const [selectedGithubImportRepo, setSelectedGithubImportRepo] = useState<string>("");
+  const [selectedGithubImportBranch, setSelectedGithubImportBranch] = useState<string>("main");
+  const [isImportingGithub, setIsImportingGithub] = useState<boolean>(false);
+
   // Deployment States
   const [deployments, setDeployments] = useState<AppDeployment[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>("Vercel");
@@ -591,10 +680,10 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
   // Database Sandbox States
   const [tables, setTables] = useState<DbTable[]>([]);
-  const [sqlQuery, setSqlQuery] = useState<string>("SELECT * FROM users LIMIT 10;");
-  const [queryResultMsg, setQueryResultMsg] = useState<string>("");
+  const [terminalCommand, setTerminalCommand] = useState<string>("SELECT * FROM users LIMIT 10;");
+  const [terminalOutputMsg, setTerminalOutputMsg] = useState<string>("");
   const [selectedTableName, setSelectedTableName] = useState<string>("users");
-  const [isExecutingSql, setIsExecutingSql] = useState<boolean>(false);
+  const [isExecutingCommand, setIsExecutingCommand] = useState<boolean>(false);
 
   // System Administration States
   const [metrics, setMetrics] = useState<SystemMetrics>({
@@ -642,18 +731,33 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     }
   };
 
+  // Helper: check if project ID is a valid UUID before sending to Supabase
+  const isValidUuid = (str: string): boolean => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+  };
+
   // ---------------------------------------------------------------------------
   // 1. DATA INITIALIZATION & LIFECYCLE
   // ---------------------------------------------------------------------------
+  // Automatically fetch projects, git repos, deployments, databases when user login status changes
   useEffect(() => {
     fetchProjects();
-    fetchWorkspaceFiles();
-    fetchGitRepos();
-    fetchDeployments();
-    fetchDatabaseTables();
     fetchMetricsAndLogs();
-    fetchProjectChatHistory(currentProjectId);
+  }, [currentUser?.id]);
 
+  // Automatically fetch workspace files, chat history, git repos, deployments, and databases when project context changes
+  useEffect(() => {
+    if (currentProjectId) {
+      fetchWorkspaceFiles(false, currentProjectId);
+      fetchProjectChatHistory(currentProjectId);
+      fetchGitRepos();
+      fetchDeployments();
+      fetchDatabaseTables();
+    }
+  }, [currentProjectId]);
+
+  useEffect(() => {
     // Auto update metrics for vivid cyber look
     const val = setInterval(() => {
       setMetrics(prev => ({
@@ -674,106 +778,24 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   const fetchProjects = async () => {
     try {
       setIsProjectsLoading(true);
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { data: dbProjects, error } = await supabase
-          .from("projects")
-          .select("*")
-          .order("updated_at", { ascending: false });
-
-        if (error) throw error;
-
-        if (dbProjects && dbProjects.length > 0) {
-          const mapped: Project[] = dbProjects.map(p => ({
-            id: p.id,
-            name: p.name,
-            description: p.description || "",
-            is_active: p.is_active || false,
-            is_archived: p.is_archived || false,
-            is_favorited: p.is_favorited || false,
-            is_default: p.is_default || false,
-            created_at: p.created_at,
-            updated_at: p.updated_at
-          }));
-          setProjects(mapped);
-
-          let activeId = currentProjectId;
-          let active = mapped.find(p => p.id === activeId);
-          if (!active) {
-            active = mapped.find(p => p.is_default) || mapped.find(p => p.is_active) || mapped[0];
-          }
+      const res = await apiFetch(getApiUrl("/api/projects"));
+      const data = await res.json();
+      if (data.success && Array.isArray(data.projects)) {
+        setProjects(data.projects);
+        
+        if (currentProjectId) {
+          const active = data.projects.find((p: any) => p.id === currentProjectId) || data.projects.find((p: any) => p.is_active);
           if (active) {
             setCurrentProjectId(active.id);
             setCurrentProject(active);
             localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", active.id);
+          } else {
+            setCurrentProjectId("");
+            setCurrentProject(null);
+            localStorage.removeItem("NEXUS_CURRENT_PROJECT_ID");
           }
         } else {
-          // AUTO-CREATE DEFAULT WORKSPACE ON SIGNUP
-          const { data: newProj, error: createError } = await supabase
-            .from("projects")
-            .insert({
-              user_id: currentUser.id,
-              name: "Default Workspace",
-              description: "My automatically created default workspace.",
-              is_active: true,
-              is_default: true,
-              is_favorited: false,
-              is_archived: false
-            })
-            .select()
-            .single();
-
-          if (createError) throw createError;
-
-          if (newProj) {
-            const defaultFiles = [
-              { path: "index.html", content: `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="utf-8">\n  <title>Default App</title>\n</head>\n<body>\n  <h1>Welcome to your new Workspace</h1>\n</body>\n</html>` },
-              { path: "src/App.js", content: `// App entrypoint` },
-              { path: "db/schema.sql", content: `-- SQLite/Postgres DB schema` },
-              { path: "package.json", content: `{\n  "name": "default-app",\n  "version": "1.0.0"\n}` },
-              { path: "README.md", content: `# New Workspace\nInitialize your files here.` }
-            ];
-
-            for (const f of defaultFiles) {
-              await supabase.from("project_files").insert({
-                project_id: newProj.id,
-                user_id: currentUser.id,
-                name: f.path.split("/").pop(),
-                path: f.path,
-                content: f.content,
-                size: f.content.length,
-                mime_type: "text/plain"
-              });
-            }
-
-            const mappedProj: Project = {
-              id: newProj.id,
-              name: newProj.name,
-              description: newProj.description || "",
-              is_active: newProj.is_active || false,
-              is_archived: newProj.is_archived || false,
-              is_favorited: newProj.is_favorited || false,
-              is_default: newProj.is_default || false,
-              created_at: newProj.created_at,
-              updated_at: newProj.updated_at
-            };
-
-            setProjects([mappedProj]);
-            setCurrentProjectId(mappedProj.id);
-            setCurrentProject(mappedProj);
-            localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", mappedProj.id);
-          }
-        }
-      } else {
-        const res = await apiFetch(getApiUrl("/api/projects"));
-        const data = await res.json();
-        if (data.success && Array.isArray(data.projects)) {
-          setProjects(data.projects);
-          const active = data.projects.find((p: any) => p.id === currentProjectId) || data.projects.find((p: any) => p.is_active) || data.projects[0];
-          if (active) {
-            setCurrentProjectId(active.id);
-            setCurrentProject(active);
-            localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", active.id);
-          }
+          setCurrentProject(null);
         }
       }
     } catch (err) {
@@ -791,66 +813,19 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     }
     try {
       setIsProjectsLoading(true);
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { data: newProj, error } = await supabase
-          .from("projects")
-          .insert({
-            user_id: currentUser.id,
-            name: newProjectName.trim(),
-            description: newProjectDesc.trim(),
-            is_active: false,
-            is_default: false,
-            is_favorited: false,
-            is_archived: false
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        if (newProj) {
-          const defaultFiles = [
-            { path: "index.html", content: `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="utf-8">\n  <title>${newProjectName.trim()}</title>\n</head>\n<body>\n  <h1>Welcome to ${newProjectName.trim()}</h1>\n</body>\n</html>` },
-            { path: "src/App.js", content: `// App entrypoint` },
-            { path: "db/schema.sql", content: `-- SQLite/Postgres DB schema` },
-            { path: "package.json", content: `{\n  "name": "${newProjectName.trim().toLowerCase().replace(/\s+/g, "-")}",\n  "version": "1.0.0"\n}` },
-            { path: "README.md", content: `# ${newProjectName.trim()}\nThis is your custom developer workspace.` }
-          ];
-
-          for (const f of defaultFiles) {
-            await supabase.from("project_files").insert({
-              project_id: newProj.id,
-              user_id: currentUser.id,
-              name: f.path.split("/").pop(),
-              path: f.path,
-              content: f.content,
-              size: f.content.length,
-              mime_type: "text/plain"
-            });
-          }
-
-          showToast(`Project "${newProj.name}" created in Supabase!`, "success");
-          setNewProjectName("");
-          setNewProjectDesc("");
-          setIsCreateProjectOpen(false);
-          await fetchProjects();
-          await handleSwitchProject(newProj.id);
-        }
-      } else {
-        const res = await apiFetch(getApiUrl("/api/projects"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: newProjectName.trim(), description: newProjectDesc.trim() })
-        });
-        const data = await res.json();
-        if (data.success && data.project) {
-          showToast(`Project "${data.project.name}" created successfully!`, "success");
-          setNewProjectName("");
-          setNewProjectDesc("");
-          setIsCreateProjectOpen(false);
-          await fetchProjects();
-          await handleSwitchProject(data.project.id);
-        }
+      const res = await apiFetch(getApiUrl("/api/projects"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newProjectName.trim(), description: newProjectDesc.trim() })
+      });
+      const data = await res.json();
+      if (data.success && data.project) {
+        showToast(`Project "${data.project.name}" created successfully!`, "success");
+        setNewProjectName("");
+        setNewProjectDesc("");
+        setIsCreateProjectOpen(false);
+        await fetchProjects();
+        await handleSwitchProject(data.project.id);
       }
     } catch (err: any) {
       showToast(`Creation failed: ${err.message}`, "error");
@@ -858,6 +833,153 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
       setIsProjectsLoading(false);
     }
   };
+
+  const handleConnectGithubOAuth = async () => {
+    try {
+      showToast("Initializing secure GitHub OAuth handshake...", "info");
+      const userId = currentUser?.id || "offline-sandbox-uuid";
+      const origin = window.location.origin;
+      const res = await fetch(getApiUrl(`/api/auth/github/url?origin=${encodeURIComponent(origin)}&userId=${encodeURIComponent(userId)}`));
+      const data = await res.json();
+      if (data.success && data.url) {
+        const width = 600;
+        const height = 700;
+        const left = window.screen.width / 2 - width / 2;
+        const top = window.screen.height / 2 - height / 2;
+        window.open(data.url, "GitHub Authorization", `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes`);
+      } else {
+        showToast(data.error || "Failed to generate GitHub authorization URL", "error");
+      }
+    } catch (err: any) {
+      showToast("Failed to initiate OAuth popup: " + err.message, "error");
+    }
+  };
+
+  const handleImportZip = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importZipFile) {
+      showToast("Please choose or drag-and-drop a ZIP file first!", "warn");
+      return;
+    }
+    try {
+      setIsImportingZip(true);
+      setImportZipError(null);
+      showToast("Reading zip file and converting to asset buffer...", "info");
+
+      const fileReader = new FileReader();
+      fileReader.onload = async () => {
+        try {
+          const arrayBuffer = fileReader.result as ArrayBuffer;
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = "";
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+
+          showToast("Sending ZIP payload to workspace compiler...", "info");
+          const res = await apiFetch(getApiUrl("/api/projects/import-zip"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: newProjectName.trim() || importZipFile.name.replace(/\.[^/.]+$/, ""),
+              description: newProjectDesc.trim() || `ZIP imported: ${importZipFile.name}`,
+              zipData: base64
+            })
+          });
+
+          const data = await res.json();
+          if (res.ok && data.success && data.project) {
+            showToast(`Successfully extracted ZIP! Found ${data.filesCount} workspace files.`, "success");
+            setNewProjectName("");
+            setNewProjectDesc("");
+            setImportZipFile(null);
+            setIsCreateProjectOpen(false);
+            await fetchProjects();
+            await handleSwitchProject(data.project.id);
+          } else {
+            setImportZipError(data.error || "ZIP compression validation failed.");
+            showToast(data.error || "Failed to import ZIP", "error");
+          }
+        } catch (err: any) {
+          setImportZipError(err.message);
+          showToast(err.message, "error");
+        } finally {
+          setIsImportingZip(false);
+        }
+      };
+      fileReader.onerror = () => {
+        setImportZipError("Could not read file.");
+        setIsImportingZip(false);
+      };
+      fileReader.readAsArrayBuffer(importZipFile);
+    } catch (err: any) {
+      setImportZipError(err.message);
+      setIsImportingZip(false);
+    }
+  };
+
+  const handleImportGithub = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGithubImportRepo) {
+      showToast("Please select a repository to import!", "warn");
+      return;
+    }
+    try {
+      setIsImportingGithub(true);
+      showToast(`Contacting GitHub REST tree for ${selectedGithubImportRepo}...`, "info");
+      const res = await apiFetch(getApiUrl("/api/projects/import-github"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repoName: selectedGithubImportRepo,
+          branch: selectedGithubImportBranch,
+          token: githubToken,
+          name: newProjectName.trim() || selectedGithubImportRepo.split("/")[1],
+          description: newProjectDesc.trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.project) {
+        showToast(`Repository imported successfully with ${data.filesCount} files!`, "success");
+        setNewProjectName("");
+        setNewProjectDesc("");
+        setSelectedGithubImportRepo("");
+        setIsCreateProjectOpen(false);
+        await fetchProjects();
+        await handleSwitchProject(data.project.id);
+      } else {
+        showToast(data.error || "GitHub import transaction rejected", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message, "error");
+    } finally {
+      setIsImportingGithub(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleAuthMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === "OAUTH_AUTH_SUCCESS" && event.data.provider === "github") {
+        const token = event.data.token;
+        const username = event.data.username;
+        if (token) {
+          setGithubToken(token);
+          localStorage.setItem("github_token", token);
+        }
+        if (username) {
+          setGithubRepo(username + "/");
+          localStorage.setItem("github_repo", username + "/");
+        }
+        showToast("GitHub connected successfully via OAuth!", "success");
+        fetchGitRepos();
+      }
+    };
+    window.addEventListener("message", handleAuthMessage);
+    return () => {
+      window.removeEventListener("message", handleAuthMessage);
+    };
+  }, []);
 
   const handleSwitchProject = async (projectId: string) => {
     try {
@@ -871,55 +993,27 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
       setIframeSrcDoc("");
       setSelectedFilePaths([]);
       setChatMessages([]); // Instantly clear previous project chat history
+      setDeployments([]);  // Instantly clear deployments
+      setGitRepos([]);     // Instantly clear git repos
+      setTables([]);       // Instantly clear database tables
       setPreviewLogs([
         "[System] Clearing project cache...",
         "[System] Loading workspace context for project ID: " + projectId
       ]);
       
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        await supabase
-          .from("projects")
-          .update({ is_active: false })
-          .eq("user_id", currentUser.id);
-
-        await supabase
-          .from("projects")
-          .update({ is_active: true })
-          .eq("id", projectId);
-
-        // Switch the active project context on the Express backend as well!
-        try {
-          await apiFetch(getApiUrl("/api/projects/switch"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ projectId })
-          });
-        } catch (switchDiskErr) {
-          console.warn("Express backend project switch sync failed:", switchDiskErr);
-        }
-
+      const res = await apiFetch(getApiUrl("/api/projects/switch"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId })
+      });
+      const data = await res.json();
+      if (data.success) {
         setCurrentProjectId(projectId);
         localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", projectId);
         showToast("Switched active project workspace!", "success");
-
         await fetchWorkspaceFiles(false, projectId);
         await fetchProjects();
         await fetchProjectChatHistory(projectId);
-      } else {
-        const res = await apiFetch(getApiUrl("/api/projects/switch"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId })
-        });
-        const data = await res.json();
-        if (data.success) {
-          setCurrentProjectId(projectId);
-          localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", projectId);
-          showToast("Switched active project workspace!", "success");
-          await fetchWorkspaceFiles(false, projectId);
-          await fetchProjects();
-          await fetchProjectChatHistory(projectId);
-        }
       }
     } catch (err) {
       showToast("Failed to switch project", "error");
@@ -928,166 +1022,116 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     }
   };
 
+  const handleCloseProject = () => {
+    setCurrentProjectId("");
+    currentProjectIdRef.current = "";
+    localStorage.removeItem("NEXUS_CURRENT_PROJECT_ID");
+    setActiveFile(null);
+    setEditedCode("");
+    setFiles([]);
+    setIframeSrcDoc("");
+    setSelectedFilePaths([]);
+    setChatMessages([]);
+    setDeployments([]);
+    setGitRepos([]);
+    setTables([]);
+    setPreviewLogs(["[System] Workspace closed. No project open."]);
+    showToast("Workspace closed. Returned to dashboard.", "info");
+  };
+
   const handleRenameProject = async () => {
     if (!projectToRename || !renameProjectName.trim()) return;
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { error } = await supabase
-          .from("projects")
-          .update({ name: renameProjectName.trim(), updated_at: new Date().toISOString() })
-          .eq("id", projectToRename.id);
-
-        if (error) throw error;
-
-        showToast("Project renamed in Supabase!", "success");
+      const res = await apiFetch(getApiUrl(`/api/projects/${projectToRename.id}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: renameProjectName.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Project renamed successfully!", "success");
         setProjectToRename(null);
         setRenameProjectName("");
         await fetchProjects();
-      } else {
-        const res = await apiFetch(getApiUrl(`/api/projects/${projectToRename.id}`), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: renameProjectName.trim() })
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast("Project renamed successfully!", "success");
-          setProjectToRename(null);
-          setRenameProjectName("");
-          await fetchProjects();
-        }
       }
     } catch (err) {
       showToast("Failed to rename project", "error");
     }
   };
 
-  const handleDeleteProject = async (proj: any) => {
-    if (!confirm(`Are you absolutely sure you want to permanently delete the project "${proj.name}"? This action will destroy all files, database states, and chat history.`)) {
-      return;
-    }
+  const handleDeleteProject = (proj: any) => {
+    setProjectToDelete(proj);
+  };
+
+  const executeDeleteProject = async (proj: any) => {
+    if (!proj) return;
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { error } = await supabase
-          .from("projects")
-          .delete()
-          .eq("id", proj.id);
-
-        if (error) throw error;
-
-        showToast(`Project "${proj.name}" deleted from Supabase.`, "success");
-        
+      const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}`), {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Project "${proj.name}" deleted successfully.`, "success");
         const remaining = projects.filter(p => p.id !== proj.id);
-        if (remaining.length > 0) {
-          const nextProj = remaining.find(p => p.is_default) || remaining[0];
-          await handleSwitchProject(nextProj.id);
+        setProjects(remaining);
+        
+        if (currentProjectId === proj.id) {
+          handleCloseProject();
         } else {
           await fetchProjects();
         }
       } else {
-        const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}`), {
-          method: "DELETE"
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast(`Project "${proj.name}" deleted.`, "success");
-          const remaining = projects.filter(p => p.id !== proj.id);
-          if (remaining.length > 0) {
-            const nextProj = remaining[0];
-            await handleSwitchProject(nextProj.id);
-          } else {
-            await handleSwitchProject("default");
-          }
-        }
+        showToast(data.error || "Failed to delete project", "error");
       }
     } catch (err) {
       showToast("Failed to delete project", "error");
+    } finally {
+      setProjectToDelete(null);
     }
   };
 
   const handleToggleFavoriteProject = async (proj: any) => {
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { error } = await supabase
-          .from("projects")
-          .update({ is_favorited: !proj.is_favorited, updated_at: new Date().toISOString() })
-          .eq("id", proj.id);
-
-        if (error) throw error;
-
-        showToast(!proj.is_favorited ? "Added to favorites!" : "Removed from favorites", "info");
+      const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_favorited: !proj.is_favorited })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.project.is_favorited ? "Added to favorites!" : "Removed from favorites", "info");
         await fetchProjects();
-      } else {
-        const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}`), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ is_favorited: !proj.is_favorited })
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast(data.project.is_favorited ? "Added to favorites!" : "Removed from favorites", "info");
-          await fetchProjects();
-        }
       }
     } catch (err) {
       showToast("Failed to toggle favorite status", "error");
     }
   };
 
+  const handleExportProject = (projId: string, projName: string) => {
+    try {
+      const url = getApiUrl(`/api/projects/${projId}/export`);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${projName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.zip`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast(`Downloading project "${projName}" ZIP archive...`, "success");
+    } catch (err: any) {
+      showToast("Failed to initiate project export download", "error");
+    }
+  };
+
   const handleDuplicateProject = async (proj: any) => {
     try {
       showToast("Duplicating project workspace...", "info");
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { data: newProj, error: errNew } = await supabase
-          .from("projects")
-          .insert({
-            user_id: currentUser.id,
-            name: `${proj.name} (Copy)`,
-            description: proj.description,
-            is_active: false,
-            is_default: false,
-            is_favorited: false,
-            is_archived: false
-          })
-          .select()
-          .single();
-
-        if (errNew) throw errNew;
-
-        if (newProj) {
-          const { data: srcFiles, error: errSrc } = await supabase
-            .from("project_files")
-            .select("*")
-            .eq("project_id", proj.id);
-
-          if (errSrc) throw errSrc;
-
-          if (srcFiles && srcFiles.length > 0) {
-            for (const f of srcFiles) {
-              await supabase.from("project_files").insert({
-                project_id: newProj.id,
-                user_id: currentUser.id,
-                name: f.name,
-                path: f.path,
-                content: f.content,
-                size: f.size,
-                mime_type: f.mime_type
-              });
-            }
-          }
-
-          showToast(`Duplicated project successfully as "${newProj.name}"!`, "success");
-          await fetchProjects();
-        }
-      } else {
-        const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}/duplicate`), {
-          method: "POST"
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast(`Duplicated project successfully as "${data.project.name}"!`, "success");
-          await fetchProjects();
-        }
+      const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}/duplicate`), {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Duplicated project successfully as "${data.project.name}"!`, "success");
+        await fetchProjects();
       }
     } catch (err) {
       showToast("Failed to duplicate project", "error");
@@ -1096,27 +1140,15 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
   const handleToggleArchiveProject = async (proj: any) => {
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { error } = await supabase
-          .from("projects")
-          .update({ is_archived: !proj.is_archived, updated_at: new Date().toISOString() })
-          .eq("id", proj.id);
-
-        if (error) throw error;
-
-        showToast(!proj.is_archived ? "Project archived." : "Project unarchived.", "info");
+      const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_archived: !proj.is_archived })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.project.is_archived ? "Project archived." : "Project unarchived.", "info");
         await fetchProjects();
-      } else {
-        const res = await apiFetch(getApiUrl(`/api/projects/${proj.id}`), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ is_archived: !proj.is_archived })
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast(data.project.is_archived ? "Project archived." : "Project unarchived.", "info");
-          await fetchProjects();
-        }
       }
     } catch (err) {
       showToast("Failed to toggle archive status", "error");
@@ -1126,24 +1158,9 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   const handleMarkAsDefaultWorkspace = async (proj: any) => {
     try {
       showToast(`Setting "${proj.name}" as your default workspace...`, "info");
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        await supabase
-          .from("projects")
-          .update({ is_default: false })
-          .eq("user_id", currentUser.id);
-
-        await supabase
-          .from("projects")
-          .update({ is_default: true })
-          .eq("id", proj.id);
-
-        showToast(`"${proj.name}" is now your default workspace!`, "success");
-        await fetchProjects();
-      } else {
-        localStorage.setItem(`NEXUS_DEFAULT_PROJECT_ID_${currentUser?.id || "offline"}`, proj.id);
-        showToast(`"${proj.name}" set as default locally.`, "success");
-        await fetchProjects();
-      }
+      localStorage.setItem(`NEXUS_DEFAULT_PROJECT_ID_${currentUser?.id || "offline"}`, proj.id);
+      showToast(`"${proj.name}" set as default locally.`, "success");
+      await fetchProjects();
     } catch (err) {
       showToast("Failed to set workspace as default", "error");
     }
@@ -1152,35 +1169,6 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   // Fetch Project Chat History
   const fetchProjectChatHistory = async (pId: string) => {
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { data: dbHistory, error } = await supabase
-          .from("chat_history")
-          .select("role, content, timestamp")
-          .eq("project_id", pId)
-          .order("created_at", { ascending: true });
-
-        if (!error && dbHistory) {
-          if (dbHistory.length > 0) {
-            setChatMessages(dbHistory.map((m, idx) => ({
-              id: `m-db-${idx}-${Date.now()}`,
-              role: m.role as "user" | "assistant",
-              content: m.content,
-              timestamp: m.timestamp
-            })));
-          } else {
-            setChatMessages([
-              {
-                id: "m-1",
-                role: "assistant",
-                content: `### Welcome to project workspace! 👋\n\nI have loaded this isolated project workspace chat environment. Speak to me to write or edit files inside this project.`,
-                timestamp: new Date().toLocaleTimeString().slice(0, 5)
-              }
-            ]);
-          }
-          return;
-        }
-      }
-
       const res = await apiFetch(getApiUrl(`/api/projects/${pId}/chat`));
       const data = await res.json();
       if (data.success && Array.isArray(data.history)) {
@@ -1250,86 +1238,34 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
   // Fetch Workspace List
   const fetchWorkspaceFiles = async (preserveActive: boolean = false, projIdOverride?: string) => {
-    const pId = projIdOverride || currentProjectId;
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { data: dbFiles, error } = await supabase
-          .from("project_files")
-          .select("*")
-          .eq("project_id", pId);
-
-        if (error) throw error;
-
-        if (dbFiles) {
-          const mapped: VirtualFile[] = dbFiles.map(f => ({
-            path: f.path,
-            name: f.name,
-            content: f.content || "",
-            language: f.path.split(".").pop() || "text"
-          }));
-          
-          setFiles(mapped);
-
-          // Synchronize files to Express server's workspace disk for co-hosted services (preview, terminal, AI prompt context)
-          apiFetch(getApiUrl("/api/workspace/sync"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ files: mapped })
-          }).catch(syncDiskErr => {
-            console.warn("Disk synchronization failed:", syncDiskErr);
-          });
-
-          if (preserveActive && activeFile) {
-            const stillExists = mapped.find((f: any) => f.path === activeFile.path);
-            if (stillExists) {
-              setActiveFile(stillExists);
-              setEditedCode(stillExists.content);
-              return;
-            }
-          }
-
-          // Default select index.html
-          const indexFile = mapped.find((f: any) => f.path === "index.html");
-          if (indexFile) {
-            setActiveFile(indexFile);
-            setEditedCode(indexFile.content);
-          } else if (mapped.length > 0) {
-            setActiveFile(mapped[0]);
-            setEditedCode(mapped[0].content);
-          } else {
-            setActiveFile(null);
-            setEditedCode("");
+      const res = await apiFetch(getApiUrl("/api/workspace/files"));
+      const data = await res.json();
+      if (data.files && Array.isArray(data.files)) {
+        setFiles(data.files);
+        
+        if (preserveActive && activeFile) {
+          const stillExists = data.files.find((f: any) => f.path === activeFile.path);
+          if (stillExists) {
+            setActiveFile(stillExists);
+            setEditedCode(stillExists.content);
+            return;
           }
         }
-      } else {
-        const res = await apiFetch(getApiUrl("/api/workspace/files"));
-        const data = await res.json();
-        if (data.files && Array.isArray(data.files)) {
-          setFiles(data.files);
-          
-          if (preserveActive && activeFile) {
-            const stillExists = data.files.find((f: any) => f.path === activeFile.path);
-            if (stillExists) {
-              setActiveFile(stillExists);
-              setEditedCode(stillExists.content);
-              return;
-            }
-          }
 
-          // Default select index.html
-          const indexFile = data.files.find((f: any) => f.path === "index.html");
-          if (indexFile) {
-            setActiveFile(indexFile);
-            setEditedCode(indexFile.content);
-          } else if (data.files.length > 0) {
-            setActiveFile(data.files[0]);
-            setEditedCode(data.files[0].content);
-          }
+        // Default select index.html
+        const indexFile = data.files.find((f: any) => f.path === "index.html");
+        if (indexFile) {
+          setActiveFile(indexFile);
+          setEditedCode(indexFile.content);
+        } else if (data.files.length > 0) {
+          setActiveFile(data.files[0]);
+          setEditedCode(data.files[0].content);
         }
       }
     } catch (e) {
       console.error("Workspace initial fetch issue: ", e);
-      showToast("Backend initial files offline. Playing local virtualization mode.", "warn");
+      showToast("Workspace scan failed.", "error");
     }
   };
 
@@ -1476,7 +1412,7 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     const baseHref = `<base href="${getApiUrl(`/api/workspace/preview/${currentProjectId}/`)}">`;
     const defaultPreviewStyle = `
   ${baseHref}
-  <style id="shaf-preview-defaults">
+  <style id="preview-defaults">
     html, body {
       background-color: #ffffff;
       color: #000000;
@@ -1500,7 +1436,7 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
       const injectedScript = `
         <script>
           try {
-            console.log("Shaf Live Evaluation Stream Active...");
+            console.log("User Live Evaluation Stream Active...");
             ${jsFile.content}
           } catch(err) {
             console.error("User JS execution crash:", err.message);
@@ -1530,49 +1466,15 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
   // Save current active code changes
   const saveActiveFileState = async (path: string, codeToSave: string) => {
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { error } = await supabase
-          .from("project_files")
-          .upsert({
-            project_id: currentProjectId,
-            user_id: currentUser.id,
-            name: path.split("/").pop() || path,
-            path: path,
-            content: codeToSave,
-            size: codeToSave.length,
-            mime_type: "text/plain",
-            updated_at: new Date().toISOString()
-          }, {
-            onConflict: "project_id,path"
-          });
-
-        if (error) throw error;
-
-        // Synchronize with the Express backend disk so preview and sub-resources work instantly!
-        try {
-          await apiFetch(getApiUrl("/api/workspace/files"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path, content: codeToSave })
-          });
-        } catch (syncErr) {
-          console.warn("Express backend file sync failed:", syncErr);
-        }
-
+      const res = await apiFetch(getApiUrl("/api/workspace/files"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, content: codeToSave })
+      });
+      const data = await res.json();
+      if (data.success) {
         setFiles(prev => prev.map(f => f.path === path ? { ...f, content: codeToSave } : f));
         return true;
-      } else {
-        const res = await apiFetch(getApiUrl("/api/workspace/files"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path, content: codeToSave })
-        });
-        const data = await res.json();
-        if (data.success) {
-          // Update files state array
-          setFiles(prev => prev.map(f => f.path === path ? { ...f, content: codeToSave } : f));
-          return true;
-        }
       }
     } catch (e) {
       console.warn("File saving failed: ", e);
@@ -1610,54 +1512,21 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
       }
 
       const content = isFolder ? "" : `// Virtual file initialized\n`;
-      const size = content.length;
 
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { error } = await supabase
-          .from("project_files")
-          .insert({
-            project_id: currentProjectId,
-            user_id: currentUser.id,
-            name: pathValue.split("/").pop() || pathValue,
-            path: pathValue,
-            content: content,
-            size: size,
-            mime_type: "text/plain"
-          });
-
-        if (error) throw error;
-
-        // Synchronize with the Express backend disk so the file or folder exists physically!
-        try {
-          await apiFetch(getApiUrl("/api/workspace/files"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: pathValue, content: content, isFolder })
-          });
-        } catch (syncErr) {
-          console.warn("Express backend file sync failed:", syncErr);
-        }
-
+      const res = await apiFetch(getApiUrl("/api/workspace/files"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: pathValue, content: content, isFolder: isFolder })
+      });
+      const data = await res.json();
+      if (data.success) {
         showToast(isFolder ? `Created folder structure: ${createFileName.trim()}` : `Created virtual file: ${pathValue}`, "success");
         setCreateFileName("");
         setIsCreatingFile(false);
         await fetchWorkspaceFiles();
-      } else {
-        const res = await apiFetch(getApiUrl("/api/workspace/files"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: pathValue, content: content })
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast(isFolder ? `Created folder structure: ${createFileName.trim()}` : `Created virtual file: ${pathValue}`, "success");
-          setCreateFileName("");
-          setIsCreatingFile(false);
-          await fetchWorkspaceFiles();
-        }
       }
-    } catch (e) {
-      showToast("Simulated file creation", "success");
+    } catch (err: any) {
+      showToast(`Creation failed: ${err.message || String(err)}`, "error");
     }
   };
 
@@ -1707,60 +1576,26 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     }
     
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        for (const itemPath of itemsToDelete) {
-          const { error } = await supabase
-            .from("project_files")
-            .delete()
-            .eq("project_id", currentProjectId)
-            .eq("path", itemPath);
-
-          if (error) throw error;
-        }
-
-        // Synchronize with the Express backend disk so the files are deleted physically!
-        try {
-          await apiFetch(getApiUrl("/api/workspace/files"), {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: itemsToDelete })
-          });
-        } catch (syncErr) {
-          console.warn("Express backend file deletion sync failed:", syncErr);
-        }
-
+      const res = await apiFetch(getApiUrl("/api/workspace/files"), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: itemsToDelete })
+      });
+      const data = await res.json();
+      if (data.success) {
         showToast(`Successfully deleted items`, "success");
         setSelectedFilePaths([]); // reset selection
         
+        // Auto select a different file if active file is in deleted list
         if (activeFile && itemsToDelete.some(path => activeFile.path === path || activeFile.path.startsWith(path + "/"))) {
           setActiveFile(null);
           setEditedCode("");
         }
         
         await fetchWorkspaceFiles(true);
-      } else {
-        const res = await apiFetch(getApiUrl("/api/workspace/files"), {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paths: itemsToDelete })
-        });
-        const data = await res.json();
-        if (data.success) {
-          showToast(`Successfully deleted items`, "success");
-          setSelectedFilePaths([]); // reset selection
-          
-          // Auto select a different file if active file is in deleted list
-          if (activeFile && itemsToDelete.some(path => activeFile.path === path || activeFile.path.startsWith(path + "/"))) {
-            setActiveFile(null);
-            setEditedCode("");
-          }
-          
-          await fetchWorkspaceFiles(true);
-        }
       }
-    } catch (e) {
-      showToast("Items deleted in memory", "success");
-      setFiles(prev => prev.filter(f => !itemsToDelete.some(path => f.path === path || f.path.startsWith(path + "/"))));
+    } catch (e: any) {
+      showToast(`Deletion failed: ${e.message || String(e)}`, "error");
     }
   };
 
@@ -1784,79 +1619,41 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     }
 
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        if (isDir) {
-          const prefix = oldPath + "/";
-          const affectedFiles = files.filter(f => f.path.startsWith(prefix));
-          
-          for (const f of affectedFiles) {
-            const relativeToDir = f.path.substring(prefix.length);
-            const targetPath = newPath + "/" + relativeToDir;
-            
-            const { error } = await supabase
-              .from("project_files")
-              .update({ 
-                path: targetPath, 
-                name: targetPath.split("/").pop() 
-              })
-              .eq("project_id", currentProjectId)
-              .eq("path", f.path);
-            
-            if (error) throw error;
-          }
-        }
-        
-        const { error } = await supabase
-          .from("project_files")
-          .update({ 
-            path: newPath, 
-            name: newName.trim() 
-          })
-          .eq("project_id", currentProjectId)
-          .eq("path", oldPath);
-
-        if (error) throw error;
-        
-        showToast(`Renamed successfully to "${newName}"`, "success");
-        await fetchWorkspaceFiles(true);
-      } else {
-        // Local mockup fallback (write new files, delete olds)
-        if (isDir) {
-          const prefix = oldPath + "/";
-          const affected = files.filter(f => f.path.startsWith(prefix));
-          for (const f of affected) {
-            const rel = f.path.substring(oldPath.length);
-            const tPath = newPath + rel;
-            await apiFetch(getApiUrl("/api/workspace/files"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ path: tPath, content: f.content })
-            });
-            await apiFetch(getApiUrl("/api/workspace/files"), {
-              method: "DELETE",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ paths: [f.path] })
-            });
-          }
-        }
-        
-        const oldFileObj = files.find(f => f.path === oldPath);
-        if (oldFileObj) {
+      if (isDir) {
+        const prefix = oldPath + "/";
+        const affected = files.filter(f => f.path.startsWith(prefix));
+        for (const f of affected) {
+          const rel = f.path.substring(oldPath.length);
+          const tPath = newPath + rel;
           await apiFetch(getApiUrl("/api/workspace/files"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: newPath, content: oldFileObj.content })
+            body: JSON.stringify({ path: tPath, content: f.content })
           });
           await apiFetch(getApiUrl("/api/workspace/files"), {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: [oldPath] })
+            body: JSON.stringify({ paths: [f.path] })
           });
         }
-        
-        showToast(`Renamed successfully to "${newName}"`, "success");
-        await fetchWorkspaceFiles(true);
       }
+      
+      const oldFileObj = files.find(f => f.path === oldPath);
+      if (oldFileObj) {
+        await apiFetch(getApiUrl("/api/workspace/files"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: newPath, content: oldFileObj.content })
+        });
+        await apiFetch(getApiUrl("/api/workspace/files"), {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: [oldPath] })
+        });
+      }
+      
+      showToast(`Renamed successfully to "${newName}"`, "success");
+      await fetchWorkspaceFiles(true);
     } catch (e: any) {
       showToast(`Rename failed: ${e.message}`, "error");
     }
@@ -1882,69 +1679,41 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     }
 
     try {
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        if (isDir) {
-          const prefix = oldPath + "/";
-          const affectedFiles = files.filter(f => f.path.startsWith(prefix));
-          for (const f of affectedFiles) {
-            const rel = f.path.substring(prefix.length);
-            const targetPath = newPath + "/" + rel;
-            const { error } = await supabase
-              .from("project_files")
-              .update({ path: targetPath, name: targetPath.split("/").pop() })
-              .eq("project_id", currentProjectId)
-              .eq("path", f.path);
-            if (error) throw error;
-          }
-        }
-
-        const { error } = await supabase
-          .from("project_files")
-          .update({ path: newPath, name: itemName })
-          .eq("project_id", currentProjectId)
-          .eq("path", oldPath);
-
-        if (error) throw error;
-
-        showToast(`Moved "${itemName}" successfully`, "success");
-        await fetchWorkspaceFiles(true);
-      } else {
-        if (isDir) {
-          const prefix = oldPath + "/";
-          const affected = files.filter(f => f.path.startsWith(prefix));
-          for (const f of affected) {
-            const rel = f.path.substring(prefix.length);
-            const targetPath = newPath + "/" + rel;
-            await apiFetch(getApiUrl("/api/workspace/files"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ path: targetPath, content: f.content })
-            });
-            await apiFetch(getApiUrl("/api/workspace/files"), {
-              method: "DELETE",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ paths: [f.path] })
-            });
-          }
-        }
-
-        const oldFileObj = files.find(f => f.path === oldPath);
-        if (oldFileObj) {
+      if (isDir) {
+        const prefix = oldPath + "/";
+        const affected = files.filter(f => f.path.startsWith(prefix));
+        for (const f of affected) {
+          const rel = f.path.substring(prefix.length);
+          const targetPath = newPath + "/" + rel;
           await apiFetch(getApiUrl("/api/workspace/files"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: newPath, content: oldFileObj.content })
+            body: JSON.stringify({ path: targetPath, content: f.content })
           });
           await apiFetch(getApiUrl("/api/workspace/files"), {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: [oldPath] })
+            body: JSON.stringify({ paths: [f.path] })
           });
         }
-
-        showToast(`Moved "${itemName}" successfully`, "success");
-        await fetchWorkspaceFiles(true);
       }
+
+      const oldFileObj = files.find(f => f.path === oldPath);
+      if (oldFileObj) {
+        await apiFetch(getApiUrl("/api/workspace/files"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: newPath, content: oldFileObj.content })
+        });
+        await apiFetch(getApiUrl("/api/workspace/files"), {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: [oldPath] })
+        });
+      }
+
+      showToast(`Moved "${itemName}" successfully`, "success");
+      await fetchWorkspaceFiles(true);
     } catch (e: any) {
       showToast(`Move failed: ${e.message}`, "error");
     }
@@ -1961,26 +1730,11 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
       const base = dotIdx !== -1 ? filePath.substring(0, dotIdx) : filePath;
       const newPath = ext ? `${base}_copy.${ext}` : `${filePath}_copy`;
 
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        const { error } = await supabase
-          .from("project_files")
-          .insert({
-            project_id: currentProjectId,
-            user_id: currentUser.id,
-            name: newPath.split("/").pop() || newPath,
-            path: newPath,
-            content: sourceFile.content,
-            size: sourceFile.content.length,
-            mime_type: "text/plain"
-          });
-        if (error) throw error;
-      } else {
-        await apiFetch(getApiUrl("/api/workspace/files"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: newPath, content: sourceFile.content })
-        });
-      }
+      await apiFetch(getApiUrl("/api/workspace/files"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: newPath, content: sourceFile.content })
+      });
 
       showToast(`Duplicated file to: "${newPath}"`, "success");
       await fetchWorkspaceFiles(true);
@@ -2032,46 +1786,20 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
         pasteCount++;
       }
 
-      if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-        // Create new pasted file
-        const { error: insertErr } = await supabase
-          .from("project_files")
-          .insert({
-            project_id: currentProjectId,
-            user_id: currentUser.id,
-            name: targetPath.split("/").pop() || targetPath,
-            path: targetPath,
-            content: sourceFile.content,
-            size: sourceFile.content.length,
-            mime_type: "text/plain"
-          });
-        if (insertErr) throw insertErr;
+      // POST to write new file
+      await apiFetch(getApiUrl("/api/workspace/files"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: targetPath, content: sourceFile.content })
+      });
 
-        // If action was CUT, delete the old file
-        if (action === "cut") {
-          const { error: deleteErr } = await supabase
-            .from("project_files")
-            .delete()
-            .eq("project_id", currentProjectId)
-            .eq("path", sourcePath);
-          if (deleteErr) throw deleteErr;
-        }
-      } else {
-        // POST to write new file
+      // If action was CUT, delete the old file
+      if (action === "cut") {
         await apiFetch(getApiUrl("/api/workspace/files"), {
-          method: "POST",
+          method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: targetPath, content: sourceFile.content })
+          body: JSON.stringify({ paths: [sourcePath] })
         });
-
-        // If action was CUT, delete the old file
-        if (action === "cut") {
-          await apiFetch(getApiUrl("/api/workspace/files"), {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: [sourcePath] })
-          });
-        }
       }
 
       showToast(action === "cut" ? `Moved "${fileName}" successfully` : `Pasted copy of "${fileName}" successfully`, "success");
@@ -2113,31 +1841,19 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
         const targetPath = file.name;
         
-        if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-          const { error } = await supabase
-            .from("project_files")
-            .upsert({
-              project_id: currentProjectId,
-              user_id: currentUser.id,
-              name: file.name,
-              path: targetPath,
-              content: content,
-              size: content.length,
-              mime_type: "text/plain"
-            }, {
-              onConflict: "project_id,path"
-            });
-          if (error) throw error;
-        } else {
-          await apiFetch(getApiUrl("/api/workspace/files"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: targetPath, content })
-          });
+        const res = await apiFetch(getApiUrl("/api/workspace/files"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: targetPath, content })
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP error ${res.status}`);
         }
         successCount++;
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to upload file:", err);
+        showToast(`Failed to upload file "${file.name}": ${err?.message || err}`, "error");
       }
     }
 
@@ -2178,31 +1894,19 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
         const targetPath = file.name;
         
-        if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-          const { error } = await supabase
-            .from("project_files")
-            .upsert({
-              project_id: currentProjectId,
-              user_id: currentUser.id,
-              name: file.name,
-              path: targetPath,
-              content: content,
-              size: content.length,
-              mime_type: "text/plain"
-            }, {
-              onConflict: "project_id,path"
-            });
-          if (error) throw error;
-        } else {
-          await apiFetch(getApiUrl("/api/workspace/files"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: targetPath, content })
-          });
+        const res = await apiFetch(getApiUrl("/api/workspace/files"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: targetPath, content })
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP error ${res.status}`);
         }
         successCount++;
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to upload dropped file:", err);
+        showToast(`Failed to upload dropped file "${file.name}": ${err?.message || err}`, "error");
       }
     }
 
@@ -2363,8 +2067,37 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     // Context preparation - include active file info
     const personaObj = PERSONAS.find(p => p.id === selectedPersona);
 
+    const activeUserKey = userApiKeys[currentAiProvider] || "";
+    if (!activeUserKey && !customGeminiApiKey) {
+      setIsAiResponding(false);
+      const providerName = currentAiProvider.toUpperCase();
+      const missingKeyMsg = `⚠️ **API Key Not Configured for ${providerName}**
+
+To use AI features, please provide your own **${providerName}** API key in the Settings panel:
+
+**How to configure your API key:**
+1. Open the **Settings (Gear icon)** at the bottom-left of the screen.
+2. Scroll to the **AI Provider Settings** section.
+3. Select **${providerName}**, paste your API key, and click **Save Key**.
+
+*Note: Your API key is stored securely in your authenticated account and is never exposed or hardcoded.*`;
+      
+      const assistantMsg: ChatMessage = {
+        id: `m-error-${Date.now()}`,
+        role: "assistant",
+        content: missingKeyMsg,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setChatMessages(prev => [...prev, assistantMsg]);
+      await saveChatMessage(currentUser?.id || null, {
+        role: "assistant",
+        content: missingKeyMsg,
+        timestamp: assistantMsg.timestamp
+      }, activeProjId);
+      return;
+    }
+
     try {
-      const activeUserKey = userApiKeys[currentAiProvider] || "";
       const res = await apiFetch(getApiUrl("/api/gemini/chat"), {
         method: "POST",
         headers: { 
@@ -2457,50 +2190,6 @@ ${technicalDetails}
 
         // If returned files list, update client-side explorer and active file
         if (data.files && Array.isArray(data.files)) {
-          // Synchronize files to Supabase to prevent data loss or stale state in the database
-          if (isSupabaseConfigured && supabase && currentUser?.id && currentUser.id !== "offline-sandbox-uuid") {
-            try {
-              // 1. Fetch current file paths from Supabase
-              const { data: existingDbFiles } = await supabase
-                .from("project_files")
-                .select("path")
-                .eq("project_id", activeProjId);
-              
-              const existingPaths = (existingDbFiles || []).map((f: any) => f.path);
-              const incomingPaths = data.files.map((f: any) => f.path);
-              const deletedPaths = existingPaths.filter(p => !incomingPaths.includes(p));
-
-              // 2. Delete removed paths
-              if (deletedPaths.length > 0) {
-                await supabase
-                  .from("project_files")
-                  .delete()
-                  .eq("project_id", activeProjId)
-                  .in("path", deletedPaths);
-              }
-
-              // 3. Upsert newly updated/written files
-              for (const file of data.files) {
-                await supabase
-                  .from("project_files")
-                  .upsert({
-                    project_id: activeProjId,
-                    user_id: currentUser.id,
-                    name: file.path.split("/").pop() || file.path,
-                    path: file.path,
-                    content: file.content || "",
-                    size: (file.content || "").length,
-                    mime_type: "text/plain",
-                    updated_at: new Date().toISOString()
-                  }, {
-                    onConflict: "project_id,path"
-                  });
-              }
-            } catch (syncErr) {
-              console.warn("Supabase background workspace sync failed:", syncErr);
-            }
-          }
-
           setFiles(data.files);
           if (activeFile) {
             const updatedActive = data.files.find((f: any) => f.path === activeFile.path);
@@ -2555,10 +2244,14 @@ I was unable to retrieve a response from the active API service. This typically 
   // AI Code Autofix
   const triggerAiAutofix = async () => {
     if (!activeFile) return;
-    showToast("Calling Shaf Nexus AI code optimizer...", "info");
+    showToast("Calling Nexus AI code optimizer...", "info");
     
     try {
       const activeUserKey = userApiKeys[currentAiProvider] || "";
+      if (!activeUserKey && !customGeminiApiKey) {
+        showToast(`API Key not configured. Please add your key for ${currentAiProvider.toUpperCase()} in Settings to use Code Autofix.`, "warn");
+        return;
+      }
       const res = await apiFetch(getApiUrl("/api/gemini/chat"), {
         method: "POST",
         headers: { 
@@ -2613,46 +2306,40 @@ I was unable to retrieve a response from the active API service. This typically 
   // ---------------------------------------------------------------------------
   // 3. DATABASE PLAYGROUND ACTIONS
   // ---------------------------------------------------------------------------
-  const executeSqlQuery = async (queryToRun?: string) => {
-    const query = queryToRun || sqlQuery;
-    if (!query.trim()) return;
+  const executeTerminalCommand = async (commandToRun?: string) => {
+    const cmd = commandToRun || terminalCommand;
+    if (!cmd.trim()) return;
 
-    setIsExecutingSql(true);
-    showToast("Routing transaction query through gateway...", "info");
+    setIsExecutingCommand(true);
+    showToast("Executing command...", "info");
 
     try {
-      const res = await apiFetch(getApiUrl("/api/db/query"), {
+      const res = await apiFetch(getApiUrl("/api/terminal/execute"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          sql: query,
-          connectionString: postgresConnectionString,
-          provider: activeDbProvider
+          command: cmd,
+          projectId: currentProjectId
         })
       });
       const data = await res.json();
-      setIsExecutingSql(false);
+      setIsExecutingCommand(false);
 
-      if (data.success) {
-        let msg = data.message;
-        if (data.rows && Array.isArray(data.rows) && data.rows.length > 0) {
-          msg += "\n\n" + JSON.stringify(data.rows, null, 2);
-        } else if (data.rows) {
-          msg += "\n\n" + JSON.stringify(data.rows, null, 2);
-        }
-        setQueryResultMsg(msg);
-        if (data.dbTables) setTables(data.dbTables);
-        showToast("Dynamic query successfully resolved!", "success");
-        fetchDatabaseTables();
-        fetchMetricsAndLogs();
+      if (res.ok) {
+        let msg = `$ ${cmd}\n`;
+        if (data.stdout) msg += data.stdout;
+        if (data.stderr) msg += `\n[stderr]\n${data.stderr}`;
+        if (data.error) msg += `\n[error]\n${data.error}`;
+        setTerminalOutputMsg(msg);
+        showToast("Command executed", "success");
       } else {
-        setQueryResultMsg("Error: " + (data.error || "Execution failed"));
+        setTerminalOutputMsg("Error: " + (data.error || "Execution failed"));
         showToast(data.error || "Execution failed", "error");
       }
     } catch (e: any) {
-      setIsExecutingSql(false);
-      setQueryResultMsg("Network Error: " + e.message);
-      showToast("Executed SQL in memory model sandbox", "success");
+      setIsExecutingCommand(false);
+      setTerminalOutputMsg("Network Error: " + e.message);
+      showToast("Execution failed", "error");
     }
   };
 
@@ -2662,8 +2349,8 @@ I was unable to retrieve a response from the active API service. This typically 
       return;
     }
     
-    setIsExecutingSql(true);
-    setQueryResultMsg(`Running cloud call with Supabase REST API...\nEndpoint: ${supabaseUrl}/rest/v1/${supabaseTargetTable}`);
+    setIsExecutingCommand(true);
+    setTerminalOutputMsg(`Running cloud call with Supabase REST API...\nEndpoint: ${supabaseUrl}/rest/v1/${supabaseTargetTable}`);
     showToast(`Contacting Supabase REST endpoint...`, "info");
     
     try {
@@ -2690,33 +2377,33 @@ I was unable to retrieve a response from the active API service. This typically 
         }
       } else if (op === "delete") {
         method = "DELETE";
-        url += `?email=eq.shaftech0777@gmail.com`;
+        url += `?email=eq.user@example.com`;
         headers["Prefer"] = "return=representation";
       }
       
       const res = await fetch(url, { method, headers, body });
       
       if (res.status === 204) {
-        setIsExecutingSql(false);
-        setQueryResultMsg(`Supabase Status 204 (No Content) - Operation executed successfully.`);
+        setIsExecutingCommand(false);
+        setTerminalOutputMsg(`Supabase Status 204 (No Content) - Operation executed successfully.`);
         showToast("Supabase action succeeded!", "success");
         return;
       }
       
       const data = await res.json();
-      setIsExecutingSql(false);
+      setIsExecutingCommand(false);
       
       if (res.ok) {
-        setQueryResultMsg(`[SUPABASE CLOUD LIVE RESULT - ${method}]\n\n` + JSON.stringify(data, null, 2));
+        setTerminalOutputMsg(`[SUPABASE CLOUD LIVE RESULT - ${method}]\n\n` + JSON.stringify(data, null, 2));
         showToast("Connected to Supabase live Cloud!", "success");
         fetchDatabaseTables();
       } else {
-        setQueryResultMsg(`Supabase API responded with Error (${res.status}):\n` + JSON.stringify(data, null, 2));
+        setTerminalOutputMsg(`Supabase API responded with Error (${res.status}):\n` + JSON.stringify(data, null, 2));
         showToast("Supabase API error: " + (data.message || res.statusText), "error");
       }
     } catch (err: any) {
-      setIsExecutingSql(false);
-      setQueryResultMsg(`Connection Refused / Error:\n${err.message}\n\n💡 Tip: Confirm your table exists on Supabase and Row Level Security (RLS) is configured to permit anon operations!`);
+      setIsExecutingCommand(false);
+      setTerminalOutputMsg(`Connection Refused / Error:\n${err.message}\n\n💡 Tip: Confirm your table exists on Supabase and Row Level Security (RLS) is configured to permit anon operations!`);
       showToast("Supabase network request failed", "error");
     }
   };
@@ -2736,7 +2423,7 @@ I was unable to retrieve a response from the active API service. This typically 
   };
 
   const scaffoldSupabaseSchema = async () => {
-    if (activeDbProvider !== "postgres" || !postgresConnectionString) {
+    if ((activeDbProvider !== "postgres" && activeDbProvider !== "supabase") || !postgresConnectionString) {
       showToast("Please input and save your Postgres Connection String under Database first!", "warn");
       return;
     }
@@ -2749,11 +2436,65 @@ I was unable to retrieve a response from the active API service. This typically 
 );
 
 CREATE TABLE IF NOT EXISTS projects (
-  id SERIAL PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID,
   name VARCHAR(255) NOT NULL,
   description TEXT,
   owner VARCHAR(255),
-  status VARCHAR(100) DEFAULT 'active'
+  status VARCHAR(100) DEFAULT 'active',
+  is_active BOOLEAN DEFAULT false,
+  is_default BOOLEAN DEFAULT false,
+  is_favorited BOOLEAN DEFAULT false,
+  is_archived BOOLEAN DEFAULT false,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS project_files (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  user_id UUID,
+  name VARCHAR(255) NOT NULL,
+  path TEXT NOT NULL,
+  content TEXT,
+  size BIGINT DEFAULT 0,
+  mime_type VARCHAR(100) DEFAULT 'text/plain',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(project_id, path)
+);
+
+CREATE TABLE IF NOT EXISTS chat_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  user_id UUID,
+  role VARCHAR(50) NOT NULL,
+  content TEXT NOT NULL,
+  timestamp VARCHAR(50),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_api_keys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  provider VARCHAR(50) NOT NULL,
+  api_key TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, provider)
+);
+
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID PRIMARY KEY,
+  full_name VARCHAR(255),
+  role VARCHAR(100),
+  avatar VARCHAR(255),
+  active_theme VARCHAR(50) DEFAULT 'dark',
+  active_db_provider VARCHAR(50) DEFAULT 'supabase',
+  postgres_conn_string TEXT,
+  supabase_url TEXT,
+  supabase_anon_key TEXT,
+  supabase_secret_key TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS task_logs (
@@ -2766,11 +2507,11 @@ CREATE TABLE IF NOT EXISTS task_logs (
 
 -- Insert demo developer template row if empty
 INSERT INTO users (name, email, role) 
-VALUES ('Shaf Dev', 'shaftech0777@gmail.com', 'Lead Architect')
+VALUES ('Lead Developer', 'user@example.com', 'Lead Architect')
 ON CONFLICT (email) DO NOTHING;`;
 
     showToast("Provisioning Supabase relational schemas...", "info");
-    await executeSqlQuery(createTablesSql);
+    await executeTerminalCommand(createTablesSql);
     showToast("Supabase target Tables (users, projects, task_logs) successfully initialized!", "success");
   };
 
@@ -2779,7 +2520,7 @@ ON CONFLICT (email) DO NOTHING;`;
     let sql = "";
     switch(key) {
       case "users":
-        sql = "INSERT INTO users (email, role) VALUES ('new_dev_model@shaf.ai', 'architect');";
+        sql = "INSERT INTO users (email, role) VALUES ('new_dev_model@example.com', 'architect');";
         break;
       case "system":
         sql = "CREATE TABLE IF NOT EXISTS server_nodes (id SERIAL PRIMARY KEY, node_ip VARCHAR(50), ping_latency VARCHAR(10));";
@@ -2788,8 +2529,8 @@ ON CONFLICT (email) DO NOTHING;`;
         sql = "SELECT * FROM system_logs ORDER BY logged_at DESC LIMIT 5;";
         break;
     }
-    setSqlQuery(sql);
-    executeSqlQuery(sql);
+    setTerminalCommand(sql);
+    executeTerminalCommand(sql);
   };
 
   // ---------------------------------------------------------------------------
@@ -2804,13 +2545,13 @@ ON CONFLICT (email) DO NOTHING;`;
     showToast("Registering git commit layout details...", "info");
 
     try {
-      const res = await fetch(getApiUrl("/api/git/commit"), {
+      const res = await apiFetch(getApiUrl("/api/git/commit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           repoId: selectedRepoId,
           message: commitMessage,
-          author: authEmail
+          author: authEmail || currentUser?.email || "developer@nexus.ai"
         })
       });
       const data = await res.json();
@@ -2818,48 +2559,51 @@ ON CONFLICT (email) DO NOTHING;`;
 
       if (data.success) {
         setCommitMessage("");
-        showToast(`Commit saved successfully! Hub ID: ${data.commit.hash}`, "success");
-        fetchGitRepos();
-        fetchMetricsAndLogs();
+        showToast(`Commit registered successfully! Hash: ${data.commit.hash.slice(0, 7)}`, "success");
+        await fetchGitRepos();
+        await fetchMetricsAndLogs();
+      } else {
+        showToast(data.error || "Failed to commit changes", "error");
       }
-    } catch (e) {
+    } catch (e: any) {
       setIsCommitting(false);
-      showToast("Local virtual commit succeeded", "success");
+      showToast("Commit failed: " + e.message, "error");
     }
   };
 
   const handleGitPush = async () => {
     setIsPushing(true);
-    showToast("Synchronizing with remote origin main...", "info");
+    showToast("Pushing committed files to GitHub remote origin...", "info");
 
     try {
-      const res = await fetch(getApiUrl("/api/git/push"), {
+      const res = await apiFetch(getApiUrl("/api/git/push"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           repoName: githubRepo,
           branch: githubBranch,
           token: githubToken,
-          message: commitMessage || "Automated sync from Shaf Nexus Workspace",
-          author: authEmail
+          message: "Sync from Nexus Workspace",
+          author: authEmail || currentUser?.email || "developer@nexus.ai"
         })
       });
       const data = await res.json();
       
       setIsPushing(false);
-      if (data.success) {
-        showToast(data.message, "success");
+      if (res.ok && data.success) {
+        showToast(data.message || "Pushed successfully!", "success");
         if (data.logs && Array.isArray(data.logs)) {
           setPreviewLogs(prev => [...prev, ...data.logs]);
         }
         setCommitMessage("");
-        fetchMetricsAndLogs();
+        await fetchGitRepos();
+        await fetchMetricsAndLogs();
       } else {
         showToast(data.error || "GitHub push transaction rejected", "error");
       }
-    } catch (e) {
+    } catch (e: any) {
       setIsPushing(false);
-      showToast("Git remote branch successfully pushed", "success");
+      showToast("Push failed: " + e.message, "error");
     }
   };
 
@@ -2882,19 +2626,9 @@ ON CONFLICT (email) DO NOTHING;`;
       });
       const data = await res.json();
       setIsCloning(false);
-      if (res.ok) {
+      if (res.ok && data.success) {
         showToast("Repository cloned successfully!", "success");
-        if (data.files) {
-          setFiles(data.files);
-          const indexFile = data.files.find((f: any) => f.path === "index.html");
-          if (indexFile) {
-            setActiveFile(indexFile);
-            setEditedCode(indexFile.content);
-          } else if (data.files.length > 0) {
-            setActiveFile(data.files[0]);
-            setEditedCode(data.files[0].content);
-          }
-        }
+        await fetchWorkspaceFiles(false, currentProjectId);
         if (data.logs) {
           setPreviewLogs(prev => [...prev, ...data.logs]);
         }
@@ -2903,19 +2637,53 @@ ON CONFLICT (email) DO NOTHING;`;
       }
     } catch (e: any) {
       setIsCloning(false);
-      showToast("Clone issue: check console or credentials", "error");
+      showToast("Clone issue: " + e.message, "error");
     }
   };
 
   // ---------------------------------------------------------------------------
   // 5. DEPLOYMENT PIPELINE CHANNELS
   // ---------------------------------------------------------------------------
+  const handleAddEnvVar = () => {
+    if (!newEnvKey.trim() || !newEnvVal.trim()) return;
+    const key = newEnvKey.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+    if (deploymentEnvVars.some(ev => ev.key === key)) {
+      showToast(`Variable "${key}" already exists!`, "warn");
+      return;
+    }
+    const updated = [...deploymentEnvVars, { key, value: newEnvVal.trim() }];
+    setDeploymentEnvVars(updated);
+    localStorage.setItem("deployment_env_vars", JSON.stringify(updated));
+    setNewEnvKey("");
+    setNewEnvVal("");
+    showToast(`Added environment variable: ${key}`, "success");
+  };
+
+  const handleRemoveEnvVar = (key: string) => {
+    const updated = deploymentEnvVars.filter(ev => ev.key !== key);
+    setDeploymentEnvVars(updated);
+    localStorage.setItem("deployment_env_vars", JSON.stringify(updated));
+    showToast(`Removed environment variable: ${key}`, "info");
+  };
+
   const handleDeployWorkspace = async () => {
     setIsDeploying(true);
     showToast(`Launching ${selectedProvider} build engine...`, "info");
     
     // Clear previous logs
     setDeploymentLogs([]);
+
+    let activeToken = "";
+    const prov = selectedProvider.toLowerCase();
+    if (prov === "vercel") {
+      activeToken = vercelToken;
+    } else if (prov === "netlify") {
+      activeToken = netlifyToken;
+    } else if (prov === "cloudflare" || prov === "cloudflare pages") {
+      activeToken = cloudflareAccountId ? `${cloudflareAccountId}:${cloudflareToken}` : cloudflareToken;
+    } else if (prov === "github pages" || prov === "github") {
+      activeToken = githubPagesToken || githubToken;
+    }
 
     try {
       const res = await apiFetch(getApiUrl("/api/deployments/trigger"), {
@@ -2924,7 +2692,8 @@ ON CONFLICT (email) DO NOTHING;`;
         body: JSON.stringify({
           provider: selectedProvider,
           projectName: activeDeployProject,
-          token: selectedProvider.toLowerCase() === "vercel" ? vercelToken : ""
+          token: activeToken,
+          envVars: deploymentEnvVars
         })
       });
       const data = await res.json();
@@ -3198,6 +2967,17 @@ ON CONFLICT (email) DO NOTHING;`;
                         ? "bg-teal-500/10 border-teal-500/15 text-teal-400 font-medium" 
                         : "hover:bg-slate-900/40 text-slate-400 hover:text-slate-250"
                       }`}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setFileContextMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          path: item.path,
+                          isDir: isDir
+                        });
+                        setProjectContextMenu(null);
+                      }}
                       onClick={() => {
                         if (isDir) {
                           toggleFolder(item.path);
@@ -3342,15 +3122,7 @@ ON CONFLICT (email) DO NOTHING;`;
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (isDir) {
-                              // Delete all files matching directory path
-                              const filesInDir = files
-                                .map(f => f.path)
-                                .filter(p => p === item.path || p.startsWith(item.path + "/"));
-                              handleDeleteItems(filesInDir);
-                            } else {
-                              handleDeleteFile(item.path);
-                            }
+                            handleDeleteItems([item.path]);
                           }}
                           className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-red-400 transition-all cursor-pointer"
                           title={isDir ? "Delete folder recursively" : "Delete file"}
@@ -3422,23 +3194,23 @@ ON CONFLICT (email) DO NOTHING;`;
                   </div>
                 )}
 
-                {/* Shaf Tech & Shaf Nexus AI brand panel expansion block */}
+                {/* User Tech & Nexus AI brand panel expansion block */}
                 <div className="mt-1">
                   <button
-                    onClick={() => setShowShafInfo(!showShafInfo)}
+                    onClick={() => setShowUserInfo(!showUserInfo)}
                     className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-teal-950/40 via-indigo-950/30 to-slate-900/40 hover:from-teal-950/60 hover:to-slate-850/60 border border-teal-500/20 hover:border-teal-500/40 text-[10px] text-teal-400 font-mono tracking-wider transition-all uppercase focus:outline-none cursor-pointer shadow-lg shadow-teal-950/20"
                   >
                     <span className="flex items-center gap-1.5 font-bold">
                       <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
-                      ℹ️ About Shaf Tech Ecosystem
+                      ℹ️ About User Tech Ecosystem
                     </span>
                     <span className="text-slate-400 font-bold bg-slate-900/60 px-1.5 py-0.5 rounded text-[8px]">
-                      {showShafInfo ? "CLOSE" : "EXPAND DETAILS"}
+                      {showUserInfo ? "CLOSE" : "EXPAND DETAILS"}
                     </span>
                   </button>
 
                   <AnimatePresence>
-                    {showShafInfo && (
+                    {showUserInfo && (
                       <motion.div
                         initial={{ opacity: 0, y: -8, height: 0 }}
                         animate={{ opacity: 1, y: 0, height: "auto" }}
@@ -3450,10 +3222,10 @@ ON CONFLICT (email) DO NOTHING;`;
                           <div className="space-y-1.5">
                             <div className="flex items-center gap-1.5">
                               <span className="text-[14px]">🔮</span>
-                              <h3 className="font-display font-bold text-sm text-white tracking-tight uppercase">Shaf Tech</h3>
+                              <h3 className="font-display font-bold text-sm text-white tracking-tight uppercase">User Tech</h3>
                             </div>
                             <p className="text-slate-400 leading-normal font-sans uppercase text-[9px] tracking-wide">
-                              Shaf Tech is the personal technology brand and digital identity of Shaf, an independent software developer, AI enthusiast, and technology entrepreneur focused on building innovative digital products and intelligent software solutions.
+                              User Tech is the personal technology brand and digital identity of User, an independent software developer, AI enthusiast, and technology entrepreneur focused on building innovative digital products and intelligent software solutions.
                             </p>
                           </div>
 
@@ -3464,7 +3236,7 @@ ON CONFLICT (email) DO NOTHING;`;
                               <span>Founder & Administrator</span>
                             </div>
                             <p className="text-slate-400 text-[10px] font-sans">
-                              As the Founder and Administrator of Shaf Tech, Shaf oversees the design, development, management, and continuous improvement of all products under the Shaf Tech ecosystem. The vision is to create secure, AI-driven, and user-friendly platforms that solve real-world problems while remaining scalable for future growth.
+                              As the Founder and Administrator of User Tech, User oversees the design, development, management, and continuous improvement of all products under the User Tech ecosystem. The vision is to create secure, AI-driven, and user-friendly platforms that solve real-world problems while remaining scalable for future growth.
                             </p>
 
                             <div className="pt-1.5 space-y-1.5 border-t border-slate-800/40">
@@ -3490,7 +3262,7 @@ ON CONFLICT (email) DO NOTHING;`;
                                 ))}
                               </div>
                               <p className="text-[8px] text-slate-500 font-mono uppercase italic leading-tight pt-1">
-                                * Shaf actively manages every product within the Shaf Tech ecosystem, from planning and design to deployment and ongoing updates.
+                                * User actively manages every product within the User Tech ecosystem, from planning and design to deployment and ongoing updates.
                               </p>
                             </div>
                           </div>
@@ -3506,7 +3278,7 @@ ON CONFLICT (email) DO NOTHING;`;
                               {/* Product 1 */}
                               <div className="p-2.5 rounded-lg bg-gradient-to-r from-slate-900 to-indigo-950/20 border border-indigo-900/30 hover:border-indigo-500/30 transition-all group">
                                 <div className="flex items-center justify-between">
-                                  <span className="font-bold text-white text-[10px] group-hover:text-indigo-400 transition-colors uppercase font-mono">🚀 Shaf Nexus AI</span>
+                                  <span className="font-bold text-white text-[10px] group-hover:text-indigo-400 transition-colors uppercase font-mono">🚀 Nexus AI</span>
                                   <span className="text-[8px] font-mono text-indigo-500 font-bold bg-indigo-500/10 px-1.5 rounded uppercase">Workspace</span>
                                 </div>
                                 <p className="text-[9px] text-slate-400 mt-1 leading-relaxed font-sans">
@@ -3517,7 +3289,7 @@ ON CONFLICT (email) DO NOTHING;`;
                               {/* Product 2 */}
                               <div className="p-2.5 rounded-lg bg-gradient-to-r from-slate-900 to-teal-950/20 border border-teal-900/30 hover:border-teal-500/30 transition-all group">
                                 <div className="flex items-center justify-between">
-                                  <span className="font-bold text-white text-[10px] group-hover:text-teal-400 transition-colors uppercase font-mono">🛒 ShafMart</span>
+                                  <span className="font-bold text-white text-[10px] group-hover:text-teal-400 transition-colors uppercase font-mono">🛒 UserMart</span>
                                   <span className="text-[8px] font-mono text-teal-500 font-bold bg-teal-500/10 px-1.5 rounded uppercase">E-Commerce</span>
                                 </div>
                                 <p className="text-[9px] text-slate-400 mt-1 leading-relaxed font-sans">
@@ -3532,7 +3304,7 @@ ON CONFLICT (email) DO NOTHING;`;
                                   <span className="text-[8px] font-mono text-amber-500 font-bold bg-amber-500/10 px-1.5 rounded uppercase">Luxury Brand</span>
                                 </div>
                                 <p className="text-[9px] text-slate-400 mt-1 leading-relaxed font-sans">
-                                  A fashion and eyewear brand managed under the Shaf Tech ecosystem, focused on offering stylish eyewear products through modern digital commerce and brand-driven customer experiences.
+                                  A fashion and eyewear brand managed under the User Tech ecosystem, focused on offering stylish eyewear products through modern digital commerce and brand-driven customer experiences.
                                 </p>
                               </div>
                             </div>
@@ -3549,7 +3321,7 @@ ON CONFLICT (email) DO NOTHING;`;
                             <div className="p-2.5 rounded-lg bg-slate-900/40 border border-slate-800 space-y-1">
                               <span className="text-[8px] font-mono uppercase tracking-widest text-violet-400 font-bold">👁️ Vision</span>
                               <p className="text-[9px] text-slate-400 leading-normal font-sans">
-                                To grow the Shaf Tech ecosystem into a recognized technology brand by continuously developing AI-powered software, scalable platforms, and digital businesses that deliver long-term value to users worldwide.
+                                To grow the User Tech ecosystem into a recognized technology brand by continuously developing AI-powered software, scalable platforms, and digital businesses that deliver long-term value to users worldwide.
                               </p>
                             </div>
                           </div>
@@ -3591,7 +3363,7 @@ ON CONFLICT (email) DO NOTHING;`;
                   }`}>
                     <div className="flex items-center justify-between mb-1 opacity-60 text-[8px] font-mono tracking-wider gap-8">
                       <div className="flex items-center gap-1.5">
-                        <span>{msg.role === "user" ? "DEVELOPER" : "SHAF AI ENGINE"}</span>
+                        <span>{msg.role === "user" ? "DEVELOPER" : "NEXUS AI ENGINE"}</span>
                         {msg.role === "assistant" && (
                           <button 
                             onClick={() => speakTextAloud(msg.id || idx.toString(), msg.content)}
@@ -3775,7 +3547,7 @@ ON CONFLICT (email) DO NOTHING;`;
 
                   <button 
                     onClick={scaffoldSupabaseSchema}
-                    disabled={isExecutingSql || !postgresConnectionString}
+                    disabled={isExecutingCommand || !postgresConnectionString}
                     className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white text-[10px] uppercase font-bold rounded tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow"
                   >
                     <span>⚡ Auto-Scaffold Tables on Supabase</span>
@@ -3858,21 +3630,21 @@ ON CONFLICT (email) DO NOTHING;`;
                   <div className="grid grid-cols-3 gap-1">
                     <button 
                       onClick={() => executeSupabaseClientOp("select")}
-                      disabled={isExecutingSql || !supabaseUrl || !supabaseAnonKey}
+                      disabled={isExecutingCommand || !supabaseUrl || !supabaseAnonKey}
                       className="py-1.5 bg-slate-900 border border-slate-850 hover:border-teal-500 hover:text-teal-400 text-slate-400 text-[8px] uppercase font-bold rounded cursor-pointer transition-all"
                     >
                       Fetch All
                     </button>
                     <button 
                       onClick={() => executeSupabaseClientOp("insert")}
-                      disabled={isExecutingSql || !supabaseUrl || !supabaseAnonKey}
+                      disabled={isExecutingCommand || !supabaseUrl || !supabaseAnonKey}
                       className="py-1.5 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-slate-950 text-[8px] uppercase font-bold rounded cursor-pointer transition-all"
                     >
                       Insert
                     </button>
                     <button 
                       onClick={() => executeSupabaseClientOp("delete")}
-                      disabled={isExecutingSql || !supabaseUrl || !supabaseAnonKey}
+                      disabled={isExecutingCommand || !supabaseUrl || !supabaseAnonKey}
                       className="py-1.5 bg-gradient-to-r from-rose-700 to-red-600 hover:from-rose-600 hover:to-red-500 text-white text-[8px] uppercase font-bold rounded cursor-pointer transition-all"
                     >
                       Clean tests
@@ -4019,7 +3791,7 @@ ON CONFLICT (email) DO NOTHING;`;
                       localStorage.setItem("github_repo", val);
                       handleSaveIntegrationField("github", { repo_name: val, branch_name: githubBranch, token: githubToken });
                     }}
-                    placeholder="shaftech/nexus-middleware"
+                    placeholder="your-github-account/your-project"
                     className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-teal-300 focus:outline-none focus:border-teal-500 font-mono text-xs"
                   />
                 </div>
@@ -4046,7 +3818,7 @@ ON CONFLICT (email) DO NOTHING;`;
                     type="password"
                     value={githubToken}
                     onChange={(e) => {
-                      const val = e.target.value;
+                      const val = e.target.value.replace(/[^\x20-\x7E]/g, "").trim();
                       setGithubToken(val);
                       localStorage.setItem("github_token", val);
                       handleSaveIntegrationField("github", { repo_name: githubRepo, branch_name: githubBranch, token: val });
@@ -4149,10 +3921,10 @@ ON CONFLICT (email) DO NOTHING;`;
                   <button 
                     key={pro}
                     onClick={() => setSelectedProvider(pro)}
-                    className={`p-3 rounded-xl border text-xs font-mono transition-all text-center ${
+                    className={`p-3 rounded-xl border text-xs font-mono transition-all text-center cursor-pointer ${
                       selectedProvider === pro 
-                      ? "bg-teal-500/10 border-teal-500/30 text-teal-400" 
-                      : "bg-slate-905 bg-slate-900 hover:bg-slate-850 hover:border-slate-800 text-slate-400"
+                      ? "bg-teal-500/10 border-teal-500/30 text-teal-400 font-bold" 
+                      : "bg-slate-900 border-slate-900 hover:bg-slate-850 hover:border-slate-800 text-slate-400"
                     }`}
                   >
                     {pro}
@@ -4160,42 +3932,192 @@ ON CONFLICT (email) DO NOTHING;`;
                 ))}
               </div>
 
-              {/* Deploy controls panel metadata fields */}
+              {/* Provider Config Fields */}
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-900 space-y-3 font-mono text-xs">
+                <span className="text-[9px] font-bold text-teal-400 uppercase tracking-wider block">
+                  {selectedProvider} Channel Setup
+                </span>
+
                 <div className="space-y-1">
-                  <span className="text-[9px] text-slate-500 block uppercase">Cloned Project Name</span>
+                  <span className="text-[9px] text-slate-500 block uppercase">Project Name / Slug</span>
                   <input 
                     type="text"
                     value={activeDeployProject}
                     onChange={(e) => setActiveDeployProject(e.target.value)}
+                    placeholder="Enter site name..."
                     className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 focus:outline-none focus:border-slate-700 text-slate-200"
                   />
                 </div>
 
                 {selectedProvider.toLowerCase() === "vercel" && (
-                  <div className="space-y-1">
-                    <span className="text-[9px] text-slate-500 block uppercase">VERCEL INTEGRATION TOKEN</span>
-                    <input 
-                      type="password"
-                      value={vercelToken}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setVercelToken(val);
-                        localStorage.setItem("vercel_token", val);
-                        handleSaveIntegrationField("vercel", { token: val });
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-slate-500 block uppercase">Vercel User Access Token</span>
+                      <input 
+                        type="password"
+                        value={vercelToken}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setVercelToken(val);
+                          localStorage.setItem("vercel_token", val);
+                          handleSaveIntegrationField("vercel", { token: val });
+                        }}
+                        placeholder="Enter Vercel User Token..."
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 focus:outline-none focus:border-slate-700 text-purple-300 placeholder-slate-700 font-mono text-[10px]"
+                      />
+                    </div>
+                    <button 
+                      onClick={() => {
+                        showToast("Vercel OAuth linkage initiated! Enter token above or authenticate in browser popup.", "info");
                       }}
-                      placeholder="Enter Vercel User Token..."
-                      className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 focus:outline-none focus:border-slate-700 text-purple-300 placeholder-slate-700 font-mono text-[10px]"
-                    />
-                    <span className="text-[8px] text-slate-600 block">Required for live non-simulated deploys.</span>
+                      className="w-full py-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-400 text-[10px] rounded transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Link size={10} />
+                      Simulate Vercel OAuth Connect
+                    </button>
                   </div>
                 )}
 
-                <div className="flex justify-between items-center text-[10px]">
+                {selectedProvider.toLowerCase() === "netlify" && (
+                  <div className="space-y-1">
+                    <span className="text-[9px] text-slate-500 block uppercase">Netlify Access Token</span>
+                    <input 
+                      type="password"
+                      value={netlifyToken}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNetlifyToken(val);
+                        localStorage.setItem("netlify_token", val);
+                        handleSaveIntegrationField("netlify", { token: val });
+                      }}
+                      placeholder="Enter Netlify PAT (API Token)..."
+                      className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 focus:outline-none focus:border-slate-700 text-purple-300 placeholder-slate-700 font-mono text-[10px]"
+                    />
+                  </div>
+                )}
+
+                {selectedProvider.toLowerCase() === "cloudflare" && (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-slate-500 block uppercase">CF API Token</span>
+                      <input 
+                        type="password"
+                        value={cloudflareToken}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCloudflareToken(val);
+                          localStorage.setItem("cloudflare_token", val);
+                          handleSaveIntegrationField("cloudflare", { token: val });
+                        }}
+                        placeholder="Cloudflare API Token..."
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 focus:outline-none focus:border-slate-700 text-purple-300 placeholder-slate-700 font-mono text-[10px]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-slate-500 block uppercase">CF Account ID</span>
+                      <input 
+                        type="text"
+                        value={cloudflareAccountId}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCloudflareAccountId(val);
+                          localStorage.setItem("cloudflare_account_id", val);
+                          handleSaveIntegrationField("cloudflare", { accountId: val });
+                        }}
+                        placeholder="Cloudflare Account ID..."
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 focus:outline-none focus:border-slate-700 text-slate-300 placeholder-slate-750 font-mono text-[10px]"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {selectedProvider.toLowerCase() === "github pages" && (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-slate-500 block uppercase">GitHub Pages PAT Token</span>
+                      <input 
+                        type="password"
+                        value={githubPagesToken}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setGithubPagesToken(val);
+                          localStorage.setItem("github_pages_token", val);
+                          handleSaveIntegrationField("github_pages", { token: val });
+                        }}
+                        placeholder="GitHub Personal Access Token..."
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 focus:outline-none focus:border-slate-700 text-purple-300 placeholder-slate-700 font-mono text-[10px]"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex-1 space-y-1">
+                        <span className="text-[8px] text-slate-550 block uppercase">Target Branch</span>
+                        <input 
+                          type="text"
+                          value={githubBranch}
+                          onChange={(e) => setGithubBranch(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-850 rounded p-1 text-[10px] text-slate-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center text-[10px] pt-1 border-t border-slate-900/40">
                   <span className="text-slate-500">Live Domain Alias</span>
-                  <span className="text-teal-400 truncate max-w-[150px]">
-                    {activeDeployProject.toLowerCase().replace(/\s+/g, "-")}.{selectedProvider.toLowerCase() === "vercel" ? "vercel.app" : "pages.dev"}
+                  <span className="text-teal-400 truncate max-w-[150px] font-bold">
+                    {activeDeployProject.toLowerCase().replace(/[^a-z0-9-]/g, "-")}.{selectedProvider.toLowerCase() === "vercel" ? "vercel.app" : selectedProvider.toLowerCase() === "netlify" ? "netlify.app" : selectedProvider.toLowerCase() === "cloudflare" ? "pages.dev" : "github.io"}
                   </span>
+                </div>
+              </div>
+
+              {/* Build Environment Variables Manager */}
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-900 space-y-3 font-mono text-xs">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Environment Variables
+                </span>
+
+                {deploymentEnvVars.length > 0 ? (
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                    {deploymentEnvVars.map(ev => (
+                      <div key={ev.key} className="flex justify-between items-center bg-slate-900/45 p-1.5 rounded border border-slate-900 text-[10px]">
+                        <span className="text-purple-400 font-bold truncate max-w-[120px]">{ev.key}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 truncate max-w-[100px]">••••••••</span>
+                          <button 
+                            onClick={() => handleRemoveEnvVar(ev.key)}
+                            className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          >
+                            <Trash size={10} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[9px] text-slate-650 italic">No custom build env variables defined.</p>
+                )}
+
+                <div className="flex gap-1.5 pt-1.5 border-t border-slate-900/40">
+                  <input 
+                    type="text"
+                    value={newEnvKey}
+                    onChange={(e) => setNewEnvKey(e.target.value)}
+                    placeholder="KEY (e.g. API_URL)"
+                    className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-[9px] focus:outline-none text-purple-300"
+                  />
+                  <input 
+                    type="text"
+                    value={newEnvVal}
+                    onChange={(e) => setNewEnvVal(e.target.value)}
+                    placeholder="Value..."
+                    className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-[9px] focus:outline-none text-slate-300"
+                  />
+                  <button 
+                    onClick={handleAddEnvVar}
+                    className="px-2 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 rounded font-bold text-[10px] cursor-pointer"
+                  >
+                    + Add
+                  </button>
                 </div>
               </div>
 
@@ -4206,7 +4128,7 @@ ON CONFLICT (email) DO NOTHING;`;
                 className="w-full py-3 bg-teal-400 hover:bg-teal-300 text-slate-950 font-bold text-xs rounded-xl shadow-lg hover:shadow-teal-400/10 transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CloudLightning size={13} />
-                {isDeploying ? "Deploying workspace live..." : "Deploy Workspace Now"}
+                {isDeploying ? `Building & shipping to ${selectedProvider}...` : `Deploy to ${selectedProvider} Now`}
               </button>
 
               {/* Build Logs Stream */}
@@ -4237,11 +4159,11 @@ ON CONFLICT (email) DO NOTHING;`;
                     <div key={dep.id} className="p-3 bg-slate-900/30 border border-slate-900 rounded-xl font-mono text-[10px] space-y-1">
                       <div className="flex justify-between items-center">
                         <span className="text-slate-300 font-bold">{dep.projectName}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-sans ${dep.status === "READY" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-teal-500/10 text-teal-400"}`}>
+                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-sans ${dep.status === "READY" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold" : "bg-teal-500/10 text-teal-400 font-bold"}`}>
                           {dep.status}
                         </span>
                       </div>
-                      <div className="flex justify-between text-slate-550">
+                      <div className="flex justify-between text-slate-500 text-[9px]">
                         <span>via {dep.provider}</span>
                         <span>{dep.timestamp}</span>
                       </div>
@@ -4401,6 +4323,16 @@ ON CONFLICT (email) DO NOTHING;`;
                         ? "bg-slate-950/40 border-slate-900/60 text-slate-500 opacity-60"
                         : "bg-slate-950/70 border-slate-850 text-slate-300 hover:border-slate-800"
                       }`}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setProjectContextMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          project: p
+                        });
+                        setFileContextMenu(null);
+                      }}
                     >
                       <div className="flex items-start justify-between gap-1.5 min-w-0">
                         <div 
@@ -4709,10 +4641,23 @@ ON CONFLICT (email) DO NOTHING;`;
               <div className="p-3 bg-slate-900/35 border border-slate-900 rounded-xl space-y-1.5 font-mono text-[9px] text-slate-500 leading-normal">
                 <p>System Version: v2.5.0-Sovereign</p>
                 <p>Secure Handshake Proxy: active</p>
-                <p>© 2026 Shaf Nexus AI Platform Inc.</p>
+                <p>© 2026 Nexus AI Platform Inc.</p>
               </div>
             </div>
           </div>
+        );
+
+      case "agent-studio":
+        return (
+          <AIAgentStudio
+            projectId={currentProjectId}
+            apiFetch={apiFetch}
+            getApiUrl={getApiUrl}
+            showToast={showToast}
+            activeUserKey={userApiKeys[currentAiProvider] || ""}
+            currentAiProvider={currentAiProvider}
+            onRefreshFiles={() => fetchWorkspaceFiles(true)}
+          />
         );
 
       default:
@@ -4757,7 +4702,7 @@ ON CONFLICT (email) DO NOTHING;`;
           setIsAuthenticated(true);
           syncUserData("offline-sandbox-uuid");
           showToast("Authenticated successfully (Simulated Sandbox)!", "success");
-        } else if (authEmail === "guest.dev@shaf.ai" || authEmail === "guest.dev@gmail.com") {
+        } else if (authEmail === "guest.dev@example.com" || authEmail === "guest.dev@gmail.com") {
           localStorage.setItem("NEXUS_FALLBACK_USER_EMAIL", authEmail);
           localStorage.setItem("NEXUS_AUTH_EMAIL", authEmail);
           localStorage.setItem("NEXUS_AUTH_PASSWORD", authPassword);
@@ -4766,7 +4711,7 @@ ON CONFLICT (email) DO NOTHING;`;
           syncUserData("offline-sandbox-uuid");
           showToast("Logged in as Guest!", "success");
         } else {
-          setErrorMessage("Invalid credentials. Try guest.dev@shaf.ai or register a new account.");
+          setErrorMessage("Invalid credentials. Try guest.dev@example.com or register a new account.");
           showToast("Auth failed: Invalid credentials.", "error");
         }
       }
@@ -4845,7 +4790,7 @@ ON CONFLICT (email) DO NOTHING;`;
               SN
             </div>
             <h1 className="text-2xl font-bold font-display tracking-tight bg-gradient-to-r from-indigo-400 via-purple-300 to-white bg-clip-text text-transparent">
-              Shaf Nexus AI Pro Workspace
+              Nexus AI Pro Workspace
             </h1>
             <p className="text-xs text-gray-500 font-mono tracking-wider">SECURE ENGINEERING HUB • MULTI-PROVIDER INTERFACE</p>
 
@@ -4898,7 +4843,7 @@ ON CONFLICT (email) DO NOTHING;`;
                     required
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="shaftech0777@gmail.com"
+                    placeholder="user@example.com"
                     className="w-full bg-[#16181D] border border-[#2D3039] rounded-xl pl-9 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                   />
                 </div>
@@ -4982,7 +4927,7 @@ ON CONFLICT (email) DO NOTHING;`;
                     required
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="shaftech0777@gmail.com"
+                    placeholder="user@example.com"
                     className="w-full bg-[#16181D] border border-[#2D3039] rounded-xl pl-9 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                   />
                 </div>
@@ -5043,7 +4988,7 @@ ON CONFLICT (email) DO NOTHING;`;
                     required
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="shaftech0777@gmail.com"
+                    placeholder="user@example.com"
                     className="w-full bg-[#16181D] border border-[#2D3039] rounded-xl pl-9 pr-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                   />
                 </div>
@@ -5076,7 +5021,7 @@ ON CONFLICT (email) DO NOTHING;`;
           <div className="pt-4 border-t border-[#2D3039] text-center">
             <button 
               onClick={() => {
-                setAuthEmail("guest.dev@shaf.ai");
+                setAuthEmail("guest.dev@example.com");
                 setAuthRole("Senior Developer");
                 setIsAuthenticated(true);
                 syncUserData("offline-sandbox-uuid");
@@ -5094,6 +5039,211 @@ ON CONFLICT (email) DO NOTHING;`;
   // ---------------------------------------------------------------------------
   // MASTER IDE LAYOUT WRAPPER (AUTHENTICATED)
   // ---------------------------------------------------------------------------
+  if (!currentProjectId) {
+    return (
+      <div className={`min-h-screen w-full flex flex-col font-sans transition-colors ${!isDarkMode ? "bg-slate-50 text-slate-900" : "bg-[#0A0B10] text-[#E2E8F0]"}`}>
+        {/* Fullscreen Dashboard Header */}
+        <header className={`h-16 border-b flex items-center justify-between px-6 shrink-0 transition-colors ${!isDarkMode ? "bg-white border-slate-200 shadow-sm" : "bg-[#0E1015] border-[#2D3039]"}`}>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-sm italic text-white shadow-md shadow-indigo-600/20">SN</div>
+            <span className="font-bold text-base tracking-tight text-white">Shaf Nexus AI Workspace</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2 rounded-xl hover:bg-white/5 text-gray-400 hover:text-white transition-colors cursor-pointer"
+              title="Toggle Theme"
+            >
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button
+              onClick={() => {
+                setIsAuthenticated(false);
+                localStorage.removeItem("NEXUS_AUTH_USER");
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2D3039] hover:bg-white/5 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer font-mono"
+            >
+              <LogOut size={14} />
+              Logout
+            </button>
+          </div>
+        </header>
+
+        {/* Dashboard Content */}
+        <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10 flex flex-col gap-8 overflow-y-auto">
+          {/* Hero Section */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-[#2D3039]/50">
+            <div>
+              <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2 font-sans">
+                Workspace Hub
+              </h1>
+              <p className="text-sm text-gray-400">
+                Manage, isolate, and boot standalone developer environments. No database or state is shared.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={fetchProjects}
+                disabled={isProjectsLoading}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#2D3039] bg-[#16181D]/40 hover:bg-[#16181D]/80 text-xs font-semibold text-gray-300 hover:text-white transition-all disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw size={14} className={isProjectsLoading ? "animate-spin" : ""} />
+                Sync List
+              </button>
+              <button
+                onClick={() => {
+                  setNewProjectName("");
+                  setNewProjectDesc("");
+                  setIsCreateProjectOpen(true);
+                }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/10 transition-all cursor-pointer"
+              >
+                <Plus size={15} />
+                Create Project
+              </button>
+            </div>
+          </div>
+
+          {/* Grid list of projects */}
+          {isProjectsLoading && projects.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-20">
+              <RefreshCw size={36} className="animate-spin text-indigo-500 mb-4" />
+              <p className="text-sm text-gray-400 font-mono">Loading developer workspaces from vault...</p>
+            </div>
+          ) : projects.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-20 border-2 border-dashed border-[#2D3039] rounded-2xl bg-[#0E1015]/30">
+              <Layers size={48} className="text-gray-600 mb-4" />
+              <h3 className="text-base font-bold text-white mb-1">No developer workspaces detected</h3>
+              <p className="text-xs text-gray-400 mb-6 text-center max-w-sm">
+                Get started by creating your very first isolated sandbox workspace. Each workspace has its own database, local files, previews, and chat history.
+              </p>
+              <button
+                onClick={() => {
+                  setNewProjectName("");
+                  setNewProjectDesc("");
+                  setIsCreateProjectOpen(true);
+                }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg transition-all cursor-pointer"
+              >
+                <Plus size={15} />
+                Create First Project
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {projects.map((project) => {
+                const isDefault = project.id === "default";
+                return (
+                  <div
+                    key={project.id}
+                    className="group relative flex flex-col justify-between p-5 rounded-2xl border border-[#2D3039] bg-[#0E1015] hover:border-[#4F46E5]/40 hover:shadow-xl hover:shadow-[#4F46E5]/5 transition-all duration-300"
+                  >
+                    <div>
+                      {/* Card Header */}
+                      <div className="flex items-start justify-between gap-4 mb-4">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl bg-indigo-950/40 p-2.5 rounded-xl text-indigo-400 group-hover:scale-110 transition-transform duration-300">
+                            {project.project_icon || "💻"}
+                          </span>
+                          <div>
+                            <h3 className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors line-clamp-1">
+                              {project.name}
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-500">
+                              {project.id.substring(0, 8)}
+                            </span>
+                          </div>
+                        </div>
+                        {isDefault && (
+                          <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                            SYSTEM DEFAULT
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Description */}
+                      <p className="text-xs text-gray-400 line-clamp-2 mb-6 min-h-[32px]">
+                        {project.description || "Local standalone developer environment workspace."}
+                      </p>
+
+                      {/* Framework and language pill */}
+                      <div className="flex items-center gap-2 mb-6">
+                        <span className="px-2 py-1 rounded-lg text-[10px] font-mono font-medium bg-slate-800/40 text-slate-300">
+                          {project.framework || "react"}
+                        </span>
+                        <span className="px-2 py-1 rounded-lg text-[10px] font-mono font-medium bg-slate-800/40 text-slate-300">
+                          {project.language || "typescript"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Bottom Actions Row */}
+                    <div className="pt-4 border-t border-[#2D3039]/50 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setProjectToRename(project);
+                            setRenameProjectName(project.name);
+                          }}
+                          className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                          title="Rename Workspace"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              showToast("Duplicating workspace...", "info");
+                              const res = await apiFetch(getApiUrl(`/api/projects/${project.id}/duplicate`), {
+                                method: "POST"
+                              });
+                              const data = await res.json();
+                              if (data.success) {
+                                showToast("Workspace duplicated successfully!", "success");
+                                fetchProjects();
+                              } else {
+                                showToast(data.error || "Failed to duplicate project", "error");
+                              }
+                            } catch (e) {
+                              showToast("Failed to duplicate project", "error");
+                            }
+                          }}
+                          className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                          title="Duplicate Workspace"
+                        >
+                          <Copy size={13} />
+                        </button>
+                        {!isDefault && (
+                          <button
+                            onClick={() => {
+                              setProjectToDelete(project);
+                            }}
+                            className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
+                            title="Delete Workspace"
+                          >
+                            <Trash size={13} />
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => handleSwitchProject(project.id)}
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#16181D] hover:bg-indigo-600 border border-[#2D3039] hover:border-indigo-500 text-xs font-bold text-gray-300 hover:text-white transition-all cursor-pointer shadow-md active:scale-95"
+                      >
+                        <Play size={10} fill="currentColor" />
+                        Launch
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div 
       onTouchStart={handleTouchStart}
@@ -5129,13 +5279,31 @@ ON CONFLICT (email) DO NOTHING;`;
           {/* Logo Title */}
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-xs italic text-white select-none shrink-0 shadow-md shadow-indigo-600/20">SN</div>
-            <span className="font-semibold text-sm tracking-tight text-white truncate max-w-[110px] xs:max-w-[140px] sm:max-w-none">Shaf Nexus AI Pro</span>
+            <span className="font-semibold text-sm tracking-tight text-white truncate max-w-[110px] xs:max-w-[140px] sm:max-w-none">Nexus AI Pro</span>
           </div>
+
+          {currentProject && (
+            <>
+              <div className="h-4 w-px bg-gray-700/50 mx-1 hidden sm:block" />
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-[#16181D] border border-[#2D3039] text-xs max-w-[200px] shrink-0">
+                <span className="font-bold text-[10px] md:text-xs text-indigo-400 truncate">
+                  {currentProject.name}
+                </span>
+                <button
+                  onClick={handleCloseProject}
+                  className="hover:text-red-400 p-0.5 rounded transition-colors text-gray-500 cursor-pointer"
+                  title="Close Workspace"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="h-4 w-px bg-gray-700/50 mx-1 hidden lg:block"></div>
           
           <div className="hidden lg:flex items-center gap-2 text-xs text-gray-400 min-w-0">
-            <span className="hover:text-white cursor-pointer truncate max-w-[100px]">shaf-nexus-platform</span>
+            <span className="hover:text-white cursor-pointer truncate max-w-[100px]">example-nexus-platform</span>
             <span>/</span>
             <span className="text-indigo-400 truncate max-w-[150px]">{activeFile ? activeFile.path : "src/App.tsx"}</span>
           </div>
@@ -5247,7 +5415,7 @@ ON CONFLICT (email) DO NOTHING;`;
             {/* AI Assistant Chat Info */}
             <button 
               onClick={() => handleNavClick("chat")}
-              title="Shaf AI Software Assistant (Gemini 3.5)"
+              title="User AI Software Assistant (Gemini 3.5)"
               className={`w-11 h-11 flex items-center justify-center rounded-xl cursor-pointer transition-all active:scale-95 relative ${
                 activeMenu === "chat" && !isSidebarCollapsed
                 ? "bg-indigo-500/10 text-indigo-400 font-medium" 
@@ -5257,6 +5425,22 @@ ON CONFLICT (email) DO NOTHING;`;
               <Bot size={19} className={activeMenu === "chat" && !isSidebarCollapsed ? "scale-105" : ""} />
               {activeMenu === "chat" && !isSidebarCollapsed && (
                 <div className="absolute left-0 top-1/4 bottom-1/4 w-[3px] bg-indigo-500 rounded-r" />
+              )}
+            </button>
+
+            {/* SHAF Nexus AI Agent Studio */}
+            <button 
+              onClick={() => handleNavClick("agent-studio")}
+              title="SHAF Nexus AI Agent Studio"
+              className={`w-11 h-11 flex items-center justify-center rounded-xl cursor-pointer transition-all active:scale-95 relative ${
+                activeMenu === "agent-studio" && !isSidebarCollapsed
+                ? "bg-teal-500/10 text-teal-400 font-medium" 
+                : "text-gray-500 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Cpu size={19} className={activeMenu === "agent-studio" && !isSidebarCollapsed ? "scale-105 animate-pulse text-teal-400" : ""} />
+              {activeMenu === "agent-studio" && !isSidebarCollapsed && (
+                <div className="absolute left-0 top-1/4 bottom-1/4 w-[3px] bg-teal-500 rounded-r" />
               )}
             </button>
 
@@ -5341,6 +5525,15 @@ ON CONFLICT (email) DO NOTHING;`;
                 <div className="absolute left-0 top-1/4 bottom-1/4 w-[3px] bg-indigo-500 rounded-r" />
               )}
             </button>
+
+            {/* Close Workspace / Return to Hub */}
+            <button 
+              onClick={handleCloseProject}
+              title="Close Workspace (Return to Hub)"
+              className="w-11 h-11 flex items-center justify-center rounded-xl cursor-pointer text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all active:scale-95"
+            >
+              <LogOut size={19} />
+            </button>
           </div>
         </nav>
 
@@ -5350,7 +5543,7 @@ ON CONFLICT (email) DO NOTHING;`;
         } ${
           isSidebarCollapsed 
             ? "md:w-0 border-r-0 -translate-x-full md:translate-x-0 opacity-0 md:opacity-0 max-md:pointer-events-none" 
-            : "md:w-80 md:border-r translate-x-0 opacity-100 max-md:pointer-events-auto"
+            : `${activeMenu === "agent-studio" ? "md:w-[480px]" : "md:w-80"} md:border-r translate-x-0 opacity-100 max-md:pointer-events-auto`
         } flex-col shrink-0 overflow-hidden transition-all duration-300 ease-in-out relative ${
           !isDarkMode ? "bg-white border-slate-200" : "bg-[#0A0B10] border-[#2D3039]"
         } max-md:absolute max-md:left-14 max-md:right-0 max-md:top-14 max-md:bottom-16 max-md:z-40 max-md:shadow-2xl`}>
@@ -5493,46 +5686,43 @@ ON CONFLICT (email) DO NOTHING;`;
                 <span>port 3000 live connected</span>
               </div>
             </div>
-
-            {/* SQL Terminal sandbox query input panel */}
+            {/* System Terminal input panel */}
             <div className="flex-1 flex p-2 min-h-0 bg-[#0E1015]">
               <div className="flex-1 flex flex-col bg-[#16181D] border border-[#2D3039] rounded p-1.5 focus-within:border-indigo-500 overflow-hidden shrink-0">
-                <textarea 
-                  value={sqlQuery}
-                  onChange={(e) => setSqlQuery(e.target.value)}
+                <textarea
+                  value={terminalCommand}
+                  onChange={(e) => setTerminalCommand(e.target.value)}
                   className="w-full flex-1 bg-transparent border-0 focus:outline-none resize-none text-[11px] text-indigo-300 font-mono tracking-wide placeholder-gray-700"
-                  placeholder="SELECT * FROM users;"
+                  placeholder="npm install or grep..."
                 />
                 <div className="flex justify-between items-center bg-[#16181D] pt-1.5 border-t border-[#2D3039] shrink-0">
-                  <span className="text-[9px] text-gray-500 uppercase tracking-tight">PostgreSQL Sandbox Console</span>
-                  <button 
-                    onClick={() => executeSqlQuery()}
-                    disabled={isExecutingSql}
+                  <span className="text-[9px] text-gray-500 uppercase tracking-tight">System Terminal</span>
+                  <button
+                    onClick={() => executeTerminalCommand()}
+                    disabled={isExecutingCommand}
                     className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-[10px] font-medium text-white transition-colors flex items-center gap-1 cursor-pointer"
                   >
-                    Exe SQL Run &rarr;
+                    Run &rarr;
                   </button>
                 </div>
               </div>
-
               {/* Console log report output right box */}
               <div className="w-72 pl-3 flex flex-col min-w-0">
                 <div className="flex-1 bg-[#16181D] border border-[#2D3039] rounded p-2 overflow-y-auto text-[9px] text-[#E2E8F0] space-y-1">
-                  <span className="text-[8px] text-indigo-400 block uppercase font-bold tracking-tight">TRANSACTION TERMINAL LOG</span>
-                  {queryResultMsg ? (
-                    <div className="whitespace-pre-wrap font-mono leading-normal text-green-400">{queryResultMsg}</div>
+                  <span className="text-[8px] text-indigo-400 block uppercase font-bold tracking-tight">TERMINAL OUTPUT</span>
+                  {terminalOutputMsg ? (
+                    <div className="whitespace-pre-wrap font-mono leading-normal text-green-400">{terminalOutputMsg}</div>
                   ) : (
-                    <p className="text-gray-550 italic leading-snug">No query resolved yet. Click Exe SQL run to play transactional models.</p>
+                    <p className="text-gray-550 italic leading-snug">No command executed yet.</p>
                   )}
                 </div>
               </div>
             </div>
           </footer>
         </main>
-
-        {/* Draggable/Interactive Slide Handle on the outer right boundary */}
+ 
         {isPreviewCollapsed && (
-          <div 
+          <div
             onClick={() => {
               setIsPreviewCollapsed(false);
               localStorage.setItem("preview_collapsed", "false");
@@ -5804,68 +5994,221 @@ ON CONFLICT (email) DO NOTHING;`;
 
       {/* Global Bottom Credit lines footer bar */}
       <footer className={`h-8 border-t flex items-center justify-between px-4 text-[10px] font-mono transition-colors shrink-0 ${!isDarkMode ? "bg-white border-slate-200 text-slate-440" : "bg-[#0E1015] border-[#2D3039] text-gray-500"} hidden md:flex`}>
-        <p>© 2026 Shaf Nexus AI Platform Inc. All rights reserved.</p>
+        <p>© 2026 Nexus AI Platform Inc. All rights reserved.</p>
         <p>Operational Cluster: Node-C12.Asia-Southeast1 • ACTIVE ENGINE: GPT-4o</p>
       </footer>
 
       {/* Project Creation Overlay Dialog */}
       {isCreateProjectOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-5 space-y-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                 <FolderPlus size={16} className="text-indigo-400" />
                 Initialize Project Workspace
               </h3>
               <button 
-                onClick={() => setIsCreateProjectOpen(false)}
+                onClick={() => {
+                  setIsCreateProjectOpen(false);
+                  setCreateProjectTab("new");
+                  setImportZipFile(null);
+                  setImportZipError(null);
+                }}
                 className="text-slate-400 hover:text-white text-xs font-mono p-1 rounded hover:bg-slate-800"
               >
                 ✕
               </button>
             </div>
-            
-            <form onSubmit={handleCreateProject} className="space-y-4 text-xs font-sans">
-              <div className="space-y-1.5">
-                <label className="text-slate-400 block uppercase font-mono text-[9px]">Project Name</label>
-                <input 
-                  type="text"
-                  required
-                  placeholder="e.g., Shaf Analytics Service"
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
 
-              <div className="space-y-1.5">
-                <label className="text-slate-400 block uppercase font-mono text-[9px]">Description (Optional)</label>
-                <textarea 
-                  placeholder="Summarize the core target files or API rules"
-                  value={newProjectDesc}
-                  onChange={(e) => setNewProjectDesc(e.target.value)}
-                  rows={3}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none"
-                />
-              </div>
+            {/* TAB SELECTORS */}
+            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-850 gap-1">
+              <button
+                type="button"
+                onClick={() => setCreateProjectTab("new")}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  createProjectTab === "new"
+                    ? "bg-slate-850 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                New Project
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreateProjectTab("zip")}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                  createProjectTab === "zip"
+                    ? "bg-slate-850 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Archive size={12} />
+                Import ZIP
+              </button>
+            </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateProjectOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs cursor-pointer transition-all"
+            {/* TAB CONTENT: NEW EMPTY PROJECT */}
+            {createProjectTab === "new" && (
+              <form onSubmit={handleCreateProject} className="space-y-4 text-xs font-sans">
+                <div className="space-y-1.5">
+                  <label className="text-slate-400 block uppercase font-mono text-[9px]">Project Name</label>
+                  <input 
+                    type="text"
+                    required
+                    placeholder="e.g., User Analytics Service"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-slate-400 block uppercase font-mono text-[9px]">Description (Optional)</label>
+                  <textarea 
+                    placeholder="Summarize the core target files or API rules"
+                    value={newProjectDesc}
+                    onChange={(e) => setNewProjectDesc(e.target.value)}
+                    rows={3}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateProjectOpen(false)}
+                    className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs cursor-pointer transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProjectsLoading}
+                    className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    {isProjectsLoading ? "Initializing..." : "Create Workspace"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB CONTENT: IMPORT ZIP */}
+            {createProjectTab === "zip" && (
+              <form onSubmit={handleImportZip} className="space-y-4 text-xs font-sans">
+                {/* Drag and Drop Zone */}
+                <div 
+                  className={`border-2 border-dashed rounded-xl p-5 text-center transition-all flex flex-col items-center justify-center cursor-pointer ${
+                    importZipFile 
+                      ? "border-emerald-500 bg-emerald-950/10" 
+                      : "border-slate-800 hover:border-slate-700 bg-slate-950/30"
+                  }`}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      const file = e.dataTransfer.files[0];
+                      if (file.name.endsWith(".zip")) {
+                        setImportZipFile(file);
+                        setImportZipError(null);
+                        if (!newProjectName) {
+                          setNewProjectName(file.name.replace(/\.[^/.]+$/, ""));
+                        }
+                      } else {
+                        setImportZipError("Only standard .zip files are supported.");
+                      }
+                    }
+                  }}
+                  onClick={() => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.accept = ".zip";
+                    input.onchange = (e: any) => {
+                      if (e.target.files && e.target.files[0]) {
+                        const file = e.target.files[0];
+                        setImportZipFile(file);
+                        setImportZipError(null);
+                        if (!newProjectName) {
+                          setNewProjectName(file.name.replace(/\.[^/.]+$/, ""));
+                        }
+                      }
+                    };
+                    input.click();
+                  }}
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isProjectsLoading}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs cursor-pointer transition-all disabled:opacity-50"
-                >
-                  {isProjectsLoading ? "Initializing..." : "Create Workspace"}
-                </button>
-              </div>
-            </form>
+                  <Archive size={32} className={`mb-2 ${importZipFile ? "text-emerald-400" : "text-slate-500"}`} />
+                  {importZipFile ? (
+                    <div className="space-y-1">
+                      <p className="text-emerald-400 font-semibold truncate max-w-[280px]">{importZipFile.name}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{(importZipFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-slate-300 font-semibold">Drag and drop ZIP archive here</p>
+                      <p className="text-[10px] text-slate-500 font-mono">or click to browse local folders</p>
+                    </div>
+                  )}
+                </div>
+
+                {importZipError && (
+                  <div className="bg-rose-950/20 border border-rose-900 text-rose-300 p-2.5 rounded-lg text-[11px] font-mono leading-snug">
+                    ⚠️ {importZipError}
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-slate-400 block uppercase font-mono text-[9px]">Project Name Override</label>
+                  <input 
+                    type="text"
+                    required
+                    placeholder="e.g., Imported Analytical Service"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-slate-400 block uppercase font-mono text-[9px]">Description (Optional)</label>
+                  <textarea 
+                    placeholder="Summarize the imported workspace scope"
+                    value={newProjectDesc}
+                    onChange={(e) => setNewProjectDesc(e.target.value)}
+                    rows={2}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCreateProjectOpen(false);
+                      setImportZipFile(null);
+                      setImportZipError(null);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs cursor-pointer transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isImportingZip || !importZipFile}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-pointer transition-all disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {isImportingZip ? (
+                      <>
+                        <RefreshCw size={12} className="animate-spin" />
+                        Extracting & Syncing...
+                      </>
+                    ) : (
+                      "Import ZIP Workspace"
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+
           </div>
         </div>
       )}
@@ -5920,6 +6263,252 @@ ON CONFLICT (email) DO NOTHING;`;
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Project Delete Confirmation Dialog */}
+      {projectToDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-red-400 pb-2 border-b border-slate-800">
+              <AlertCircle size={20} />
+              <h3 className="text-sm font-semibold text-white">
+                Permanently Delete Project?
+              </h3>
+            </div>
+            
+            <p className="text-xs text-gray-300 leading-relaxed">
+              Are you absolutely sure you want to permanently delete <span className="font-bold text-red-400">"{projectToDelete.name}"</span>? 
+              This action is <span className="font-semibold text-white uppercase font-mono text-[10px]">irreversible</span> and will instantly destroy:
+            </p>
+            <ul className="text-[11px] text-gray-400 list-disc list-inside space-y-1 bg-slate-950/40 p-3 rounded-lg border border-slate-850">
+              <li>All project source files and directories</li>
+              <li>Local standalone database (SQLite states)</li>
+              <li>Chat history with AI assistants</li>
+              <li>Deployments metadata</li>
+            </ul>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setProjectToDelete(null)}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs cursor-pointer transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => executeDeleteProject(projectToDelete)}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold text-xs cursor-pointer transition-all"
+              >
+                Delete Workspace
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Project Context Menu */}
+      {projectContextMenu && (
+        <div 
+          style={{ 
+            top: `${projectContextMenu.y}px`, 
+            left: `${projectContextMenu.x}px` 
+          }}
+          className="fixed z-[100] bg-slate-900/95 border border-slate-800/80 rounded-xl shadow-2xl py-1.5 w-48 text-[11px] text-slate-300 font-mono backdrop-blur-md animate-in fade-in duration-100 select-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div 
+            onClick={() => {
+              setProjectToRename(projectContextMenu.project);
+              setRenameProjectName(projectContextMenu.project.name);
+              setProjectContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-600 hover:text-white cursor-pointer transition-all"
+          >
+            <Edit2 size={12} className="text-slate-400 group-hover:text-white" />
+            <span>Rename Project</span>
+          </div>
+
+          <div 
+            onClick={() => {
+              handleDuplicateProject(projectContextMenu.project);
+              setProjectContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-600 hover:text-white cursor-pointer transition-all"
+          >
+            <CopyPlus size={12} className="text-slate-400 group-hover:text-white" />
+            <span>Duplicate Project</span>
+          </div>
+
+          <div 
+            onClick={() => {
+              handleToggleArchiveProject(projectContextMenu.project);
+              setProjectContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-600 hover:text-white cursor-pointer transition-all"
+          >
+            <Archive size={12} className="text-slate-400 group-hover:text-white" />
+            <span>{projectContextMenu.project.is_archived ? "Activate Project" : "Archive Project"}</span>
+          </div>
+
+          <div 
+            onClick={() => {
+              handleToggleFavoriteProject(projectContextMenu.project);
+              setProjectContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-600 hover:text-white cursor-pointer transition-all"
+          >
+            <Star size={12} className={projectContextMenu.project.is_favorited ? "text-amber-400" : "text-slate-400"} />
+            <span>{projectContextMenu.project.is_favorited ? "Unfavorite Project" : "Favorite Project"}</span>
+          </div>
+
+          <div 
+            onClick={() => {
+              handleExportProject(projectContextMenu.project.id, projectContextMenu.project.name);
+              setProjectContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-600 hover:text-white cursor-pointer transition-all"
+          >
+            <Download size={12} className="text-slate-400 group-hover:text-white" />
+            <span>Export Project (ZIP)</span>
+          </div>
+
+          <div 
+            onClick={() => {
+              setActiveMenu("settings");
+              setProjectContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-600 hover:text-white cursor-pointer transition-all"
+          >
+            <Settings size={12} className="text-slate-400 group-hover:text-white" />
+            <span>Project Settings</span>
+          </div>
+
+          <div className="border-t border-slate-800/60 my-1" />
+
+          <div 
+            onClick={() => {
+              handleDeleteProject(projectContextMenu.project);
+              setProjectContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-rose-950 hover:text-rose-400 text-rose-400 cursor-pointer transition-all"
+          >
+            <Trash size={12} />
+            <span>Delete Project</span>
+          </div>
+        </div>
+      )}
+
+      {/* File Context Menu */}
+      {fileContextMenu && (
+        <div 
+          style={{ 
+            top: `${fileContextMenu.y}px`, 
+            left: `${fileContextMenu.x}px` 
+          }}
+          className="fixed z-[100] bg-slate-900/95 border border-slate-800/80 rounded-xl shadow-2xl py-1.5 w-44 text-[11px] text-slate-300 font-mono backdrop-blur-md animate-in fade-in duration-100 select-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div 
+            onClick={() => {
+              handleRenameItem(fileContextMenu.path, fileContextMenu.isDir);
+              setFileContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-teal-600 hover:text-white cursor-pointer transition-all"
+          >
+            <Edit2 size={12} className="text-slate-400" />
+            <span>Rename</span>
+          </div>
+
+          {!fileContextMenu.isDir && (
+            <div 
+              onClick={() => {
+                handleDuplicateFile(fileContextMenu.path);
+                setFileContextMenu(null);
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 hover:bg-teal-600 hover:text-white cursor-pointer transition-all"
+            >
+              <CopyPlus size={12} className="text-slate-400" />
+              <span>Duplicate</span>
+            </div>
+          )}
+
+          <div 
+            onClick={() => {
+              handleCopyFileAction(fileContextMenu.path);
+              setFileContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-teal-600 hover:text-white cursor-pointer transition-all"
+          >
+            <Copy size={12} className="text-slate-400" />
+            <span>Copy</span>
+          </div>
+
+          <div 
+            onClick={() => {
+              handleCutFileAction(fileContextMenu.path);
+              setFileContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-teal-600 hover:text-white cursor-pointer transition-all"
+          >
+            <ArrowDown size={12} className="text-slate-400" />
+            <span>Cut</span>
+          </div>
+
+          {fileClipboard && (
+            <div 
+              onClick={() => {
+                const targetFolder = fileContextMenu.isDir 
+                  ? fileContextMenu.path 
+                  : (fileContextMenu.path.substring(0, fileContextMenu.path.lastIndexOf("/")) || "");
+                handlePasteFileAction(targetFolder);
+                setFileContextMenu(null);
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 hover:bg-teal-600 hover:text-white cursor-pointer transition-all"
+            >
+              <Save size={12} className="text-emerald-400" />
+              <span>Paste Here</span>
+            </div>
+          )}
+
+          <div 
+            onClick={() => {
+              handleMoveItem(fileContextMenu.path, fileContextMenu.isDir);
+              setFileContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-teal-600 hover:text-white cursor-pointer transition-all"
+          >
+            <ArrowUpDown size={12} className="text-slate-400" />
+            <span>Move</span>
+          </div>
+
+          {!fileContextMenu.isDir && (
+            <div 
+              onClick={() => {
+                const fObj = files.find(f => f.path === fileContextMenu.path);
+                if (fObj) handleDownloadFile(fObj);
+                setFileContextMenu(null);
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 hover:bg-teal-600 hover:text-white cursor-pointer transition-all"
+            >
+              <Download size={12} className="text-slate-400" />
+              <span>Download</span>
+            </div>
+          )}
+
+          <div className="border-t border-slate-800/60 my-1" />
+
+          <div 
+            onClick={() => {
+              handleDeleteItems([fileContextMenu.path]);
+              setFileContextMenu(null);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-rose-950 hover:text-rose-400 text-rose-400 cursor-pointer transition-all"
+          >
+            <Trash size={12} />
+            <span>Delete</span>
           </div>
         </div>
       )}

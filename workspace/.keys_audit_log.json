@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-07-05T17:08:37.288Z",
+    "category": "CHAT_PROMPT_ENTRY",
+    "input": "Optimize and fix any bugs in the active file. Output ONLY the optimized code. No chat conversation wrapping, just the clean source code for this virtual workspace file."
+  },
+  {
+    "timestamp": "2026-07-05T17:08:37.648Z",
+    "category": "CHAT_PROMPT_ENTRY",
+    "input": "Optimize and fix any bugs in the active file. Output ONLY the optimized code. No chat conversation wrapping, just the clean source code for this virtual workspace file."
+  },
+  {
+    "timestamp": "2026-07-05T17:59:42.517Z",
+    "category": "SQL_COMMAND_ENTRY",
+    "input": "SELECT * FROM users LIMIT 10;"
+  },
+  {
+    "timestamp": "2026-07-05T18:05:30.182Z",
+    "category": "CHAT_PROMPT_ENTRY",
+    "input": "test"
+  },
+  {
+    "timestamp": "2026-07-05T18:05:35.013Z",
+    "category": "CHAT_PROMPT_ENTRY",
+    "input": "test"
+  },
+  {
+    "timestamp": "2026-07-05T18:07:23.569Z",
+    "category": "SQL_COMMAND_ENTRY",
+    "input": "CREATE TABLE IF NOT EXISTS users (\n  id SERIAL PRIMARY KEY,\n  name VARCHAR(255) NOT NULL,\n  email VARCHAR(255) UNIQUE NOT NULL,\n  role VARCHAR(100),\n  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE TABLE IF NOT EXISTS projects (\n  id SERIAL PRIMARY KEY,\n  name VARCHAR(255) NOT NULL,\n  description TEXT,\n  owner VARCHAR(255),\n  status VARCHAR(100) DEFAULT 'active'\n);\n\nCREATE TABLE IF NOT EXISTS task_logs (\n  id SERIAL PRIMARY KEY,\n  timestamp VARCHAR(50),\n  service VARCHAR(100),\n  action TEXT,\n  status VARCHAR(50)\n);\n\n-- Insert demo developer template row if empty\nINSERT INTO users (name, email, role) \nVALUES ('Shaf Dev', 'shaftech0777@gmail.com', 'Lead Architect')\nON CONFLICT (email) DO NOTHING;"
+  }
+]

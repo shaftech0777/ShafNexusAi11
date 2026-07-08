@@ -1,0 +1,17 @@
+{
+  "id": "211bbf52-e394-41ea-a2d7-93b53b61e2cd",
+  "name": "Project 211BB",
+  "description": "Local standalone developer environment workspace.",
+  "is_active": false,
+  "is_archived": false,
+  "is_favorited": false,
+  "created_at": "2026-07-07T19:09:26.253Z",
+  "updated_at": "2026-07-07T19:09:26.253Z",
+  "framework": "react",
+  "language": "typescript",
+  "last_opened": "2026-07-07T19:09:26.253Z",
+  "project_icon": "💻",
+  "color": "teal",
+  "tags": [],
+  "status": "active"
+}

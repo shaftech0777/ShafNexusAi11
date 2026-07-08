@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS public.user_integrations (
     user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL,
     integration_name TEXT NOT NULL, -- 'github', 'vercel', 'netlify', 'cloudflare'
     token TEXT, -- securely stored integration credential
-    repo_name TEXT, -- e.g. "shaftech/nexus-middleware"
+    repo_name TEXT, -- e.g. "user-account/example-repo"
     branch_name TEXT DEFAULT 'main',
     config JSONB DEFAULT '{}'::jsonb, -- custom configuration metadata
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -373,6 +373,39 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+
+-- ===========================================================================
+-- 10. CREATE DEPLOYMENTS TABLE
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS public.deployments (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL,
+    project_id TEXT NOT NULL,
+    provider TEXT NOT NULL, -- 'Vercel', 'Netlify', 'Cloudflare Pages', 'GitHub Pages'
+    deployment_id TEXT, -- remote deployment ID or hash
+    status TEXT NOT NULL DEFAULT 'READY', -- 'READY', 'BUILDING', 'FAILED'
+    url TEXT NOT NULL,
+    project_name TEXT NOT NULL,
+    logs TEXT[] DEFAULT '{}'::text[],
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS for deployments
+ALTER TABLE public.deployments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow users to view own deployments" 
+    ON public.deployments FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Allow users to insert own deployments" 
+    ON public.deployments FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Allow users to update own deployments" 
+    ON public.deployments FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Allow users to delete own deployments" 
+    ON public.deployments FOR DELETE USING (auth.uid() = user_id);
 
 
 -- ===========================================================================

@@ -119,9 +119,8 @@ export async function saveUserApiKey(userId: string | null, provider: string, ap
           onConflict: "user_id,provider"
         });
       if (error) throw error;
-    } catch (e) {
-      console.error("[UserService] Failed to upsert API key to Supabase:", e);
-      throw e;
+    } catch (e: any) {
+      console.warn("[UserService] Failed to upsert API key to Supabase (using local storage fallback):", e.message || e);
     }
   }
 }
@@ -147,9 +146,8 @@ export async function deleteUserApiKey(userId: string | null, provider: string):
         .eq("user_id", userId)
         .eq("provider", provider);
       if (error) throw error;
-    } catch (e) {
-      console.error("[UserService] Failed to delete API key from Supabase:", e);
-      throw e;
+    } catch (e: any) {
+      console.warn("[UserService] Failed to delete API key from Supabase (using local storage fallback):", e.message || e);
     }
   }
 }
@@ -296,9 +294,8 @@ export async function saveUserProfile(userId: string | null, profileData: any): 
           updated_at: new Date().toISOString()
         });
       if (error) throw error;
-    } catch (e) {
-      console.error("[UserService] Failed to save user profile to Supabase:", e);
-      throw e;
+    } catch (e: any) {
+      console.warn("[UserService] Failed to save user profile to Supabase (using local storage fallback):", e.message || e);
     }
   }
 }
@@ -371,9 +368,8 @@ export async function saveUserIntegration(
           onConflict: "user_id,integration_name"
         });
       if (error) throw error;
-    } catch (e) {
-      console.error("[UserService] Failed to upsert user integration:", e);
-      throw e;
+    } catch (e: any) {
+      console.warn("[UserService] Failed to upsert user integration to Supabase (using local storage fallback):", e.message || e);
     }
   }
 }

@@ -1,0 +1,17 @@
+{
+  "id": "14b10bf3-4e61-41dd-81e1-f6c1402fb963",
+  "name": "Project 14B10",
+  "description": "Local standalone developer environment workspace.",
+  "is_active": false,
+  "is_archived": false,
+  "is_favorited": false,
+  "created_at": "2026-07-07T19:09:26.252Z",
+  "updated_at": "2026-07-07T19:09:26.252Z",
+  "framework": "react",
+  "language": "typescript",
+  "last_opened": "2026-07-07T19:09:26.252Z",
+  "project_icon": "💻",
+  "color": "teal",
+  "tags": [],
+  "status": "active"
+}
