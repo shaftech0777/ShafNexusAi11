@@ -1348,8 +1348,7 @@ export const app = express();
 
 initWorkspaceLocally("default");
 
-async function startServer() {
-  app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // Enable full Cross-Origin Resource Sharing (CORS) for Android/Capacitor/External mobile clients
@@ -4110,6 +4109,7 @@ When responding:
 
   // Serve static UI client in production mode, mount Vite in development
 
+async function initializeServerEnv() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -4132,5 +4132,5 @@ When responding:
   }
 }
 
-startServer();
+initializeServerEnv();
 
