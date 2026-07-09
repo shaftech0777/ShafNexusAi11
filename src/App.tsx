@@ -214,6 +214,12 @@ export default function App() {
   const [mobileTab, setMobileTab] = useState<"files" | "code" | "preview">("code");
   const [activeFile, setActiveFile] = useState<VirtualFile | null>(null);
   const [files, setFiles] = useState<VirtualFile[]>([]);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState<string>("");
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState<string>("");
+  const [codeSuggestion, setCodeSuggestion] = useState<string>("");
+  const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
   const [editedCode, setEditedCode] = useState<string>("");
   const [fileSearch, setFileSearch] = useState<string>("");
   const [createFileName, setCreateFileName] = useState<string>("");
@@ -785,23 +791,27 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
       if (data.success && Array.isArray(data.projects)) {
         setProjects(data.projects);
         
-        if (currentProjectId) {
-          const active = data.projects.find((p: any) => p.id === currentProjectId) || data.projects.find((p: any) => p.is_active);
-          if (active) {
-            setCurrentProjectId(active.id);
-            setCurrentProject(active);
-            localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", active.id);
-          } else {
-            setCurrentProjectId("");
-            setCurrentProject(null);
-            localStorage.removeItem("NEXUS_CURRENT_PROJECT_ID");
-          }
+        // Find active project: match currentProjectId, then falls back to any active project, then the first project
+        const storedId = localStorage.getItem("NEXUS_CURRENT_PROJECT_ID") || currentProjectId;
+        const active = data.projects.find((p: any) => p.id === storedId) 
+                    || data.projects.find((p: any) => p.is_active) 
+                    || data.projects[0];
+                    
+        if (active) {
+          setCurrentProjectId(active.id);
+          setCurrentProject(active);
+          localStorage.setItem("NEXUS_CURRENT_PROJECT_ID", active.id);
         } else {
+          setCurrentProjectId("");
           setCurrentProject(null);
+          localStorage.removeItem("NEXUS_CURRENT_PROJECT_ID");
         }
+      } else {
+        showToast(`Failed to load projects list: ${data.error || "Unknown error"}`, "error");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch projects list:", err);
+      showToast(`Network error loading projects: ${err.message}`, "error");
     } finally {
       setIsProjectsLoading(false);
     }
@@ -828,6 +838,8 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
         setIsCreateProjectOpen(false);
         await fetchProjects();
         await handleSwitchProject(data.project.id);
+      } else {
+        showToast(`Project creation failed: ${data.error || data.message || "Unknown error"}`, "error");
       }
     } catch (err: any) {
       showToast(`Creation failed: ${err.message}`, "error");
@@ -1016,6 +1028,8 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
         await fetchWorkspaceFiles(false, projectId);
         await fetchProjects();
         await fetchProjectChatHistory(projectId);
+      } else {
+        showToast(`Failed to switch project: ${data.error || "Unknown error"}`, "error");
       }
     } catch (err) {
       showToast("Failed to switch project", "error");
@@ -1237,6 +1251,30 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
 
     return () => clearTimeout(delayDebounceFn);
   }, [editedCode, activeFile?.path]);
+
+  // Keep openTabs synced with active file
+  useEffect(() => {
+    if (activeFile && !openTabs.includes(activeFile.path)) {
+      setOpenTabs(prev => [...prev, activeFile.path]);
+    }
+  }, [activeFile?.path]);
+
+  // Global Keyboard Shortcuts (Command Palette)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+P or Cmd+P
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+      // Escape closes command palette
+      if (e.key === "Escape") {
+        setIsCommandPaletteOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Fetch Workspace List
   const fetchWorkspaceFiles = async (preserveActive: boolean = false, projIdOverride?: string) => {
@@ -1463,6 +1501,10 @@ Ask me anything or say **"Build a custom section"** to modify file state!`,
     }
     setActiveFile(file);
     setEditedCode(file.content);
+    setOpenTabs(prev => {
+      if (prev.includes(file.path)) return prev;
+      return [...prev, file.path];
+    });
   };
 
   // Save current active code changes
@@ -2099,6 +2141,35 @@ To use AI features, please provide your own **${providerName}** API key in the S
       return;
     }
 
+    // Grab selected code from active textarea editor
+    let selectedCode = "";
+    if (textareaRef.current) {
+      const start = textareaRef.current.selectionStart;
+      const end = textareaRef.current.selectionEnd;
+      if (start !== end) {
+        selectedCode = textareaRef.current.value.substring(start, end);
+      }
+    }
+
+    // Grab dependencies from package.json
+    const pkgFile = files.find(f => f.path === "package.json");
+    let projectDependencies = "";
+    if (pkgFile) {
+      try {
+        const parsed = JSON.parse(pkgFile.content);
+        projectDependencies = JSON.stringify(parsed.dependencies || {}, null, 2);
+      } catch (e) {
+        projectDependencies = "package.json not loaded or invalid";
+      }
+    }
+
+    // Grab warnings/errors from logs
+    const errorsList = previewLogs.filter(log => log.toLowerCase().includes("error") || log.toLowerCase().includes("fail") || log.toLowerCase().includes("err"));
+    const errors = errorsList.length > 0 ? errorsList.slice(-5).join("\n") : "";
+
+    // Grab file structure
+    const fileStructure = files.map(f => `- \`${f.path}\` (${f.language})`).join("\n");
+
     try {
       const res = await apiFetch(getApiUrl("/api/gemini/chat"), {
         method: "POST",
@@ -2115,7 +2186,11 @@ To use AI features, please provide your own **${providerName}** API key in the S
             language: activeFile.language,
             content: editedCode
           } : null,
-          persona: personaObj?.role
+          persona: personaObj?.role,
+          selectedCode,
+          projectDependencies,
+          errors,
+          fileStructure
         })
       });
 
@@ -2303,6 +2378,57 @@ I was unable to retrieve a response from the active API service. This typically 
     } catch (e) {
       showToast("Simulated AI optimizations", "success");
     }
+  };
+
+  // AI Actions Trigger
+  const triggerAiAction = async (actionType: string) => {
+    if (!activeFile) {
+      showToast("Please open a file to apply AI actions", "warn");
+      return;
+    }
+    
+    // Switch to Chat menu to show response
+    setActiveMenu("chat");
+    setIsSidebarCollapsed(false);
+    setIsCommandPaletteOpen(false);
+    
+    let prompt = "";
+    switch (actionType) {
+      case "explain":
+        prompt = `Explain the following code inside \`${activeFile.path}\`:\n\n\`\`\`\n${editedCode || activeFile.content}\n\`\`\``;
+        break;
+      case "fix":
+        prompt = `Find and fix any bugs, errors, or security issues in this code inside \`${activeFile.path}\`:\n\n\`\`\`\n${editedCode || activeFile.content}\n\`\`\``;
+        break;
+      case "refactor":
+        prompt = `Refactor this code in \`${activeFile.path}\` for better DRY principles, structural clarity, and readability:\n\n\`\`\`\n${editedCode || activeFile.content}\n\`\`\``;
+        break;
+      case "component":
+        prompt = `Based on our current file \`${activeFile.path}\`, please help me generate a new clean, responsive interactive React component to add to our project. Let me know what files to edit.`;
+        break;
+      case "api":
+        prompt = `Design and generate a production-ready Express API endpoint related to the functions inside \`${activeFile.path}\`.`;
+        break;
+      case "schema":
+        prompt = `Design and generate a comprehensive database schema (SQLite tables or Postgres definitions) to store and query the data types defined in \`${activeFile.path}\`.`;
+        break;
+      case "optimize":
+        prompt = `Analyze the performance, speed, and efficiency of this code inside \`${activeFile.path}\`, and suggest / write optimized version of it:\n\n\`\`\`\n${editedCode || activeFile.content}\n\`\`\``;
+        break;
+      default:
+        prompt = `Analyze current active workspace file \`${activeFile.path}\`.`;
+    }
+    
+    setChatInput(prompt);
+    // Submit after React re-renders input value
+    setTimeout(() => {
+      const btn = document.getElementById("send-chat-btn");
+      if (btn) {
+        btn.click();
+      } else {
+        handleSendChatMessage();
+      }
+    }, 150);
   };
 
   // ---------------------------------------------------------------------------
@@ -3147,6 +3273,104 @@ ON CONFLICT (email) DO NOTHING;`;
                 <RefreshCw size={12} />
                 Reset Workspace Code
               </button>
+            </div>
+          </div>
+        );
+      }
+
+      case "search": {
+        // Find files containing search text
+        const searchMatches: { file: VirtualFile; lines: { lineNum: number; text: string }[] }[] = [];
+        if (globalSearchQuery.trim().length >= 2) {
+          const query = globalSearchQuery.toLowerCase();
+          files.forEach(f => {
+            const lines = f.content.split("\n");
+            const fileMatches: { lineNum: number; text: string }[] = [];
+            lines.forEach((lineText, idx) => {
+              if (lineText.toLowerCase().includes(query)) {
+                fileMatches.push({ lineNum: idx + 1, text: lineText.trim() });
+              }
+            });
+            if (fileMatches.length > 0) {
+              searchMatches.push({ file: f, lines: fileMatches });
+            }
+          });
+        }
+
+        return (
+          <div className="h-full flex flex-col bg-[#0E1015] font-mono" id="panel-search">
+            <div className="p-4 border-b border-[#2D3039] shrink-0">
+              <span className="font-display font-semibold text-xs tracking-wider text-slate-400 uppercase">Search In Files</span>
+              <div className="mt-3 relative">
+                <input
+                  type="text"
+                  value={globalSearchQuery}
+                  onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                  placeholder="Search code strings..."
+                  className="w-full bg-[#16181D] border border-[#2D3039] rounded px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 font-mono"
+                  autoFocus
+                />
+                {globalSearchQuery && (
+                  <button
+                    onClick={() => setGlobalSearchQuery("")}
+                    className="absolute right-2.5 top-2 text-gray-500 hover:text-white"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="mt-2 text-[10px] text-gray-500">
+                {globalSearchQuery.trim().length < 2 
+                  ? "Enter at least 2 characters to search"
+                  : `Found ${searchMatches.reduce((acc, m) => acc + m.lines.length, 0)} results across ${searchMatches.length} files`
+                }
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-3 min-h-0">
+              {searchMatches.map(({ file, lines }) => (
+                <div key={file.path} className="border border-[#2D3039] rounded bg-[#16181D]/30 overflow-hidden">
+                  <div 
+                    onClick={() => selectActiveFile(file)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#16181D] hover:bg-[#20232b] transition-colors text-xs text-indigo-400 font-semibold cursor-pointer border-b border-[#2D3039]"
+                  >
+                    <FileText size={12} />
+                    <span className="truncate">{file.path}</span>
+                  </div>
+                  <div className="p-1.5 divide-y divide-[#2D3039]/30 text-[11px] font-mono">
+                    {lines.map(({ lineNum, text }) => (
+                      <div 
+                        key={lineNum}
+                        onClick={() => {
+                          selectActiveFile(file);
+                          // Give textarea focus and cursor positioning
+                          setTimeout(() => {
+                            if (textareaRef.current) {
+                              textareaRef.current.focus();
+                              const codeLines = file.content.split("\n");
+                              let charIndex = 0;
+                              for (let i = 0; i < lineNum - 1; i++) {
+                                charIndex += codeLines[i].length + 1;
+                              }
+                              textareaRef.current.selectionStart = charIndex;
+                              textareaRef.current.selectionEnd = charIndex + codeLines[lineNum - 1].length;
+                            }
+                          }, 100);
+                        }}
+                        className="p-1 hover:bg-[#16181D]/80 rounded transition-colors cursor-pointer flex items-start gap-2 group text-gray-400 hover:text-white"
+                      >
+                        <span className="text-gray-600 font-bold w-6 text-right shrink-0 select-none group-hover:text-indigo-400">{lineNum}</span>
+                        <span className="truncate flex-1 font-mono">{text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {globalSearchQuery.trim().length >= 2 && searchMatches.length === 0 && (
+                <div className="p-8 text-center text-gray-500 text-xs">
+                  No matches found for "{globalSearchQuery}"
+                </div>
+              )}
             </div>
           </div>
         );
@@ -5241,6 +5465,18 @@ ON CONFLICT (email) DO NOTHING;`;
               })}
             </div>
           )}
+
+          {/* High-fidelity Brand Footer */}
+          <footer className="mt-auto pt-8 border-t border-[#2D3039]/40 text-center flex flex-col md:flex-row md:items-center md:justify-between text-gray-500 text-[11px] font-mono gap-4 shrink-0">
+            <div>
+              &copy; {new Date().getFullYear()} <span className="text-gray-400 font-bold">Shaf Tech</span>. All rights reserved.
+            </div>
+            <div className="flex items-center gap-1.5 justify-center">
+              <span>Platform designed by founder</span>
+              <span className="text-indigo-400 font-bold">Muhammad Shaf</span>
+              <span>as a modern high-performance AI IDE.</span>
+            </div>
+          </footer>
         </main>
       </div>
     );
@@ -5282,6 +5518,19 @@ ON CONFLICT (email) DO NOTHING;`;
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-xs italic text-white select-none shrink-0 shadow-md shadow-indigo-600/20">SN</div>
             <span className="font-semibold text-sm tracking-tight text-white truncate max-w-[110px] xs:max-w-[140px] sm:max-w-none">Nexus AI Pro</span>
+          </div>
+
+          {/* Professional Header Command Trigger Search Box */}
+          <div 
+            onClick={() => setIsCommandPaletteOpen(true)}
+            className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-[#16181D] hover:bg-[#20232b] border border-[#2D3039] hover:border-indigo-500/50 rounded-lg text-xs text-gray-400 font-mono cursor-pointer transition-all select-none w-56 justify-between"
+            title="Open Command Palette (Ctrl+P)"
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Search size={12} className="text-gray-500" />
+              <span className="truncate flex-1">Command Palette...</span>
+            </div>
+            <span className="text-[9px] text-gray-500 bg-white/5 border border-white/10 rounded px-1 shrink-0 font-sans font-semibold">⌘P</span>
           </div>
 
           {currentProject && (
@@ -5410,6 +5659,22 @@ ON CONFLICT (email) DO NOTHING;`;
             >
               <FolderOpen size={19} className={activeMenu === "explorer" && !isSidebarCollapsed ? "scale-105" : ""} />
               {activeMenu === "explorer" && !isSidebarCollapsed && (
+                <div className="absolute left-0 top-1/4 bottom-1/4 w-[3px] bg-indigo-500 rounded-r" />
+              )}
+            </button>
+
+            {/* Project Full-Text Search */}
+            <button 
+              onClick={() => handleNavClick("search")}
+              title="Search Inside Project Files"
+              className={`w-11 h-11 flex items-center justify-center rounded-xl cursor-pointer transition-all active:scale-95 relative ${
+                activeMenu === "search" && !isSidebarCollapsed
+                ? "bg-indigo-500/10 text-indigo-400 font-medium" 
+                : "text-gray-500 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Search size={19} className={activeMenu === "search" && !isSidebarCollapsed ? "scale-105" : ""} />
+              {activeMenu === "search" && !isSidebarCollapsed && (
                 <div className="absolute left-0 top-1/4 bottom-1/4 w-[3px] bg-indigo-500 rounded-r" />
               )}
             </button>
@@ -5605,6 +5870,52 @@ ON CONFLICT (email) DO NOTHING;`;
               )}
             </div>
           </div>
+
+          {/* Professional File Tabs Bar */}
+          {openTabs.length > 0 && (
+            <div className="flex items-center bg-[#0E1015] border-b border-[#2D3039] overflow-x-auto whitespace-nowrap select-none scrollbar-thin shrink-0">
+              {openTabs.map((path) => {
+                const fileObj = files.find(f => f.path === path);
+                if (!fileObj) return null;
+                const isActive = activeFile?.path === path;
+                const name = path.split("/").pop() || path;
+                
+                return (
+                  <div
+                    key={path}
+                    onClick={() => selectActiveFile(fileObj)}
+                    className={`group flex items-center gap-2 px-4 py-2 text-xs font-mono border-r border-[#2D3039] transition-all cursor-pointer ${
+                      isActive 
+                        ? "bg-[#0A0B10] text-indigo-400 border-t-2 border-t-indigo-500 font-bold" 
+                        : "text-gray-400 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <FileText size={12} className={isActive ? "text-indigo-400" : "text-gray-500"} />
+                    <span>{name}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const nextTabs = openTabs.filter(t => t !== path);
+                        setOpenTabs(nextTabs);
+                        if (activeFile?.path === path) {
+                          if (nextTabs.length > 0) {
+                            const firstRem = files.find(f => f.path === nextTabs[0]);
+                            if (firstRem) selectActiveFile(firstRem);
+                          } else {
+                            setActiveFile(null);
+                            setEditedCode("");
+                          }
+                        }
+                      }}
+                      className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Mobile Code Editor Syntax Toolbar */}
           {activeFile && (
@@ -6512,6 +6823,96 @@ ON CONFLICT (email) DO NOTHING;`;
             <Trash size={12} />
             <span>Delete</span>
           </div>
+        </div>
+      )}
+
+      {/* Command Palette Overlay */}
+      {isCommandPaletteOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[999] flex items-start justify-center pt-[15vh] px-4 font-mono">
+          <div className="bg-[#0E1015] border border-[#2D3039] rounded-xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[50vh] transition-all">
+            <div className="p-3 bg-[#16181D] border-b border-[#2D3039] flex items-center gap-2 shrink-0">
+              <Search className="text-gray-500 shrink-0" size={16} />
+              <input
+                type="text"
+                placeholder="Type a file path, action, or utility command..."
+                value={commandPaletteQuery}
+                onChange={(e) => setCommandPaletteQuery(e.target.value)}
+                className="bg-transparent border-0 outline-none text-xs text-white placeholder-gray-600 flex-1 font-mono"
+                autoFocus
+              />
+              <span className="text-[10px] text-gray-500 bg-white/5 border border-white/10 rounded px-1.5 py-0.5 select-none shrink-0">ESC</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
+              {/* Category: AI Actions */}
+              <div className="text-[9px] font-bold text-indigo-400/80 uppercase px-3 py-1 tracking-wider select-none shrink-0">AI Actions</div>
+              {[
+                { label: "Explain Code", desc: "Understand what the active file does in detail", action: () => triggerAiAction("explain") },
+                { label: "Fix Code Errors", desc: "Identify and resolve bug, lint, or security issues", action: () => triggerAiAction("fix") },
+                { label: "Refactor Code", desc: "Optimize readability and DRY structure", action: () => triggerAiAction("refactor") },
+                { label: "Generate React Component", desc: "Generate a new component layout", action: () => triggerAiAction("component") },
+                { label: "Generate API Route", desc: "Create an Express API route handler", action: () => triggerAiAction("api") },
+                { label: "Create Database Schema", desc: "Design SQL or ORM schema", action: () => triggerAiAction("schema") },
+                { label: "Optimize Performance", desc: "Improve runtime and efficiency limits", action: () => triggerAiAction("optimize") },
+              ].filter(item => item.label.toLowerCase().includes(commandPaletteQuery.toLowerCase())).map((item) => (
+                <div
+                  key={item.label}
+                  onClick={item.action}
+                  className="flex flex-col px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={12} className="text-indigo-400" />
+                    <span className="text-xs text-white font-semibold">{item.label}</span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-sans mt-0.5 ml-5">{item.desc}</span>
+                </div>
+              ))}
+
+              {/* Category: File Navigation */}
+              <div className="text-[9px] font-bold text-gray-500 uppercase px-3 py-1 tracking-wider mt-3 select-none shrink-0">Project Files</div>
+              {files.filter(f => f.path.toLowerCase().includes(commandPaletteQuery.toLowerCase())).slice(0, 10).map((f) => (
+                <div
+                  key={f.path}
+                  onClick={() => {
+                    selectActiveFile(f);
+                    setIsCommandPaletteOpen(false);
+                  }}
+                  className="flex flex-col px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText size={12} className="text-gray-400" />
+                    <span className="text-xs text-white font-semibold">{f.path.split("/").pop()}</span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-mono mt-0.5 ml-5">{f.path}</span>
+                </div>
+              ))}
+
+              {/* Category: Tools */}
+              <div className="text-[9px] font-bold text-teal-400/80 uppercase px-3 py-1 tracking-wider mt-3 select-none shrink-0">Utilities</div>
+              {[
+                { label: "Toggle Theme (Light / Dark)", desc: "Toggle interface contrast colorway", action: () => { setIsDarkMode(!isDarkMode); setIsCommandPaletteOpen(false); } },
+                { label: "Reset Workspace Code", desc: "Restore base template codebase layout", action: () => { handleWorkspaceReset(); setIsCommandPaletteOpen(false); } },
+                { label: "Trigger Cloud Deployment", desc: "Deploy changes to simulated cloud environment", action: () => { handleDeployWorkspace(); setIsCommandPaletteOpen(false); } },
+              ].filter(item => item.label.toLowerCase().includes(commandPaletteQuery.toLowerCase())).map((item) => (
+                <div
+                  key={item.label}
+                  onClick={item.action}
+                  className="flex flex-col px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sliders size={12} className="text-teal-400" />
+                    <span className="text-xs text-white font-semibold">{item.label}</span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-sans mt-0.5 ml-5">{item.desc}</span>
+                </div>
+              ))}
+            </div>
+            <div className="p-2 border-t border-[#2D3039] bg-[#16181D]/50 text-[10px] text-gray-500 text-center shrink-0">
+              Press <span className="font-sans">ESC</span> to close or click backdrop to exit.
+            </div>
+          </div>
+          {/* Backdrop exit */}
+          <div className="absolute inset-0 -z-10" onClick={() => setIsCommandPaletteOpen(false)} />
         </div>
       )}
     </div>

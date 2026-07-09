@@ -1,5 +1,5 @@
 {
-  "name": "Shaf Nexus AI Pro",
+  "name": "Shaf Nexus AI",
   "description": "An advanced AI-powered software engineering workspace featuring chat assists, custom database tools, live previews, and simulated git & deployments.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
