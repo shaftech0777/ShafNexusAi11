@@ -38,8 +38,8 @@ function formatSupabaseUrl(url: string): string {
 }
 
 // Clean and validate Supabase configuration
-const rawUrl = (process.env.VITE_SUPABASE_URL || "").trim();
-const rawKey = (process.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const rawUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+const rawKey = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "").trim();
 
 const supabaseUrl = formatSupabaseUrl(rawUrl) || defaultUrl;
 const supabaseAnonKey = (rawKey && rawKey !== "your-supabase-anon-key") ? rawKey : defaultKey;
@@ -310,8 +310,8 @@ async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
       .eq("user_id", userId);
       
     if (error) {
-      console.warn("Supabase project sync skipped or fallback used.", error.message || error);
-      return getProjectsListOnDisk(activeId);
+      console.error("Supabase project sync failed:", error.message || error);
+      throw new Error(`Supabase projects query failed: ${error.message || JSON.stringify(error)}`);
     }
     
     const dbProjIds = new Set((dbProjects || []).map(p => p.id));
@@ -1344,10 +1344,11 @@ function initWorkspaceLocally(projectId: string = "default") {
     fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
   }
 }
+export const app = express();
+
 initWorkspaceLocally("default");
 
 async function startServer() {
-  const app = express();
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
@@ -1603,6 +1604,9 @@ async function startServer() {
       const userId = req.headers["x-user-id"] as string;
       const projectId = crypto.randomUUID();
       
+      console.log(`[POST /api/projects] [START] Creating project. Name: "${name || "Unnamed"}", Description: "${description || "None"}"`);
+      console.log(`[POST /api/projects] Client Header X-User-Id: "${userId}", Supabase Client exists: ${!!supabase}`);
+      
       initWorkspaceLocally(projectId);
       
       const metaPath = path.join(getWorkspaceDir(projectId), "project_metadata.json");
@@ -1624,8 +1628,10 @@ async function startServer() {
         updated_at: new Date().toISOString()
       };
       fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
+      console.log(`[POST /api/projects] Local metadata successfully scaffolded at: ${metaPath}`);
       
       if (supabase && userId && userId !== "offline-sandbox-uuid") {
+        console.log(`[POST /api/projects] Inserting project metadata into Supabase. Project ID: "${projectId}", User ID: "${userId}"`);
         const { error: insertErr } = await safeInsertProject(supabase, {
           id: projectId,
           user_id: userId,
@@ -1646,16 +1652,20 @@ async function startServer() {
         });
           
         if (insertErr) {
-          console.error("Supabase project insert failed:", insertErr.message || insertErr);
+          console.error(`[POST /api/projects] Supabase safeInsertProject failed:`, insertErr);
           return res.status(400).json({ 
             success: false, 
             error: `Database project creation failed: ${insertErr.message || JSON.stringify(insertErr)}` 
           });
         }
+        console.log(`[POST /api/projects] Supabase safeInsertProject succeeded! Project row created.`);
 
         const dir = getWorkspaceDir(projectId);
         const filesList = getWorkspaceFiles(dir, dir);
+        console.log(`[POST /api/projects] Found ${filesList.length} initial files to sync to project_files table for Project ID: "${projectId}"`);
+        
         for (const file of filesList) {
+          console.log(`[POST /api/projects] Upserting file to Supabase: "${file.path}" (${file.content.length} bytes)`);
           const { error: fileErr } = await supabase
             .from("project_files")
             .upsert({
@@ -1672,17 +1682,22 @@ async function startServer() {
             });
           
           if (fileErr) {
-            console.error("Supabase project_files upsert failed:", fileErr.message || fileErr);
+            console.error(`[POST /api/projects] Supabase project_files upsert failed for "${file.path}":`, fileErr.message || fileErr);
             return res.status(400).json({
               success: false,
-              error: `Database file creation failed: ${fileErr.message || JSON.stringify(fileErr)}`
+              error: `Database file creation failed for ${file.path}: ${fileErr.message || JSON.stringify(fileErr)}`
             });
           }
         }
+        console.log(`[POST /api/projects] All ${filesList.length} files successfully uploaded/upserted in Supabase.`);
+      } else {
+        console.log(`[POST /api/projects] Supabase integration skipped. (Supabase setup: ${!!supabase}, User: "${userId}")`);
       }
       
+      console.log(`[POST /api/projects] [SUCCESS] Project "${meta.name}" successfully created and response dispatched!`);
       res.json({ success: true, project: meta });
     } catch (err: any) {
+      console.error(`[POST /api/projects] [CRITICAL ERROR] Failed to create project:`, err);
       res.status(500).json({ error: "Failed to create project", details: err.message });
     }
   });
@@ -4110,9 +4125,11 @@ When responding:
   }
 
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Nexus AI local server ready on port ${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Nexus AI local server ready on port ${PORT}`);
+    });
+  }
 }
 
 startServer();
