@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, FormEvent } from "react";
 import { 
   Terminal, 
   Settings, 
+  Sliders,
   Bot, 
   FolderOpen, 
   Database, 
@@ -69,6 +70,7 @@ import {
 } from "./types";
 import { supabase, isSupabaseConfigured } from "./lib/supabaseClient";
 import { AIAgentStudio } from "./components/AIAgentStudio";
+import { DeveloperToolkit } from "./components/DeveloperToolkit";
 import { 
   maskKey, 
   getActiveProvider, 

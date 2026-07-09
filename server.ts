@@ -12,6 +12,7 @@ import crypto from "crypto";
 import AdmZip from "adm-zip";
 import os from "os";
 import agentRouter from "./server/agent";
+import toolkitRouter from "./server/toolkit";
 
 // Load environment variables from .env
 dotenv.config();
@@ -219,6 +220,71 @@ function getProjectsListOnDisk(activeId: string | null = null): ProjectMetadata[
   }));
 }
 
+async function safeInsertProject(supabase: any, row: any) {
+  const { error } = await supabase.from("projects").insert(row);
+  if (error) {
+    console.warn("Full projects insert failed, retrying with standard columns. Error:", error.message || error);
+    const safeRow: any = {
+      id: row.id,
+      user_id: row.user_id,
+      name: row.name,
+      description: row.description,
+      is_active: row.is_active,
+      is_default: row.is_default,
+      is_favorited: row.is_favorited,
+      is_archived: row.is_archived,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+    for (const key of Object.keys(safeRow)) {
+      if (safeRow[key] === undefined) {
+        delete safeRow[key];
+      }
+    }
+    const { error: retryError } = await supabase.from("projects").insert(safeRow);
+    if (retryError) {
+      console.error("Standard projects insert failed too:", retryError.message || retryError);
+      return { error: retryError };
+    }
+  }
+  return { error: null };
+}
+
+async function safeUpdateProject(supabase: any, row: any, id: string, userId: string) {
+  const { error } = await supabase
+    .from("projects")
+    .update(row)
+    .eq("id", id)
+    .eq("user_id", userId);
+  if (error) {
+    console.warn("Full projects update failed, retrying with standard columns. Error:", error.message || error);
+    const safeRow: any = {
+      name: row.name,
+      description: row.description,
+      is_active: row.is_active,
+      is_default: row.is_default,
+      is_favorited: row.is_favorited,
+      is_archived: row.is_archived,
+      updated_at: row.updated_at
+    };
+    for (const key of Object.keys(safeRow)) {
+      if (safeRow[key] === undefined) {
+        delete safeRow[key];
+      }
+    }
+    const { error: retryError } = await supabase
+      .from("projects")
+      .update(safeRow)
+      .eq("id", id)
+      .eq("user_id", userId);
+    if (retryError) {
+      console.error("Standard projects update failed too:", retryError.message || retryError);
+      return { error: retryError };
+    }
+  }
+  return { error: null };
+}
+
 async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
   const supabase = getSupabaseClient(req);
   const userId = req.headers["x-user-id"] as string;
@@ -301,26 +367,24 @@ async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
     for (const lp of localProjects) {
       if (lp.id && !dbProjIds.has(lp.id) && lp.id !== "default") {
         const fullMeta = readProjectMetadata(lp.id) as any;
-        const { error: insertErr } = await supabase
-          .from("projects")
-          .insert({
-            id: lp.id,
-            user_id: userId,
-            name: lp.name,
-            description: lp.description,
-            is_active: lp.is_active,
-            is_archived: lp.is_archived,
-            is_favorited: lp.is_favorited,
-            created_at: lp.created_at,
-            updated_at: lp.updated_at,
-            framework: fullMeta.framework || "react",
-            language: fullMeta.language || "typescript",
-            last_opened: fullMeta.last_opened || new Date().toISOString(),
-            project_icon: fullMeta.project_icon || "💻",
-            color: fullMeta.color || "teal",
-            tags: fullMeta.tags || [],
-            status: fullMeta.status || "active"
-          });
+        const { error: insertErr } = await safeInsertProject(supabase, {
+          id: lp.id,
+          user_id: userId,
+          name: lp.name,
+          description: lp.description,
+          is_active: lp.is_active,
+          is_archived: lp.is_archived,
+          is_favorited: lp.is_favorited,
+          created_at: lp.created_at,
+          updated_at: lp.updated_at,
+          framework: fullMeta.framework || "react",
+          language: fullMeta.language || "typescript",
+          last_opened: fullMeta.last_opened || new Date().toISOString(),
+          project_icon: fullMeta.project_icon || "💻",
+          color: fullMeta.color || "teal",
+          tags: fullMeta.tags || [],
+          status: fullMeta.status || "active"
+        });
           
         if (!insertErr) {
           const dir = getWorkspaceDir(lp.id);
@@ -348,7 +412,7 @@ async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
     console.error("Error during syncProjects:", err);
   }
   
-  return getProjectsListOnDisk();
+  return getProjectsListOnDisk(activeId);
 }
 
 function copyFolderRecursive(src: string, dest: string) {
@@ -1554,26 +1618,24 @@ async function startServer() {
       fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
       
       if (supabase && userId && userId !== "offline-sandbox-uuid") {
-        const { error: insertErr } = await supabase
-          .from("projects")
-          .insert({
-            id: projectId,
-            user_id: userId,
-            name: meta.name,
-            description: meta.description,
-            is_active: meta.is_active,
-            is_archived: meta.is_archived,
-            is_favorited: meta.is_favorited,
-            created_at: meta.created_at,
-            updated_at: meta.updated_at,
-            framework: meta.framework,
-            language: meta.language,
-            last_opened: meta.last_opened,
-            project_icon: meta.project_icon,
-            color: meta.color,
-            tags: meta.tags,
-            status: meta.status
-          });
+        const { error: insertErr } = await safeInsertProject(supabase, {
+          id: projectId,
+          user_id: userId,
+          name: meta.name,
+          description: meta.description,
+          is_active: meta.is_active,
+          is_archived: meta.is_archived,
+          is_favorited: meta.is_favorited,
+          created_at: meta.created_at,
+          updated_at: meta.updated_at,
+          framework: meta.framework,
+          language: meta.language,
+          last_opened: meta.last_opened,
+          project_icon: meta.project_icon,
+          color: meta.color,
+          tags: meta.tags,
+          status: meta.status
+        });
           
         if (insertErr) {
           console.warn("Supabase project insert skipped or fallback used.", insertErr.message || insertErr);
@@ -1654,25 +1716,21 @@ async function startServer() {
       fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
       
       if (supabase && userId && userId !== "offline-sandbox-uuid") {
-        const { error: updateErr } = await supabase
-          .from("projects")
-          .update({
-            name: meta.name,
-            description: meta.description,
-            is_active: meta.is_active,
-            is_archived: meta.is_archived,
-            is_favorited: meta.is_favorited,
-            updated_at: meta.updated_at,
-            framework: meta.framework,
-            language: meta.language,
-            last_opened: meta.last_opened,
-            project_icon: meta.project_icon,
-            color: meta.color,
-            tags: meta.tags,
-            status: meta.status
-          })
-          .eq("id", id)
-          .eq("user_id", userId);
+        const { error: updateErr } = await safeUpdateProject(supabase, {
+          name: meta.name,
+          description: meta.description,
+          is_active: meta.is_active,
+          is_archived: meta.is_archived,
+          is_favorited: meta.is_favorited,
+          updated_at: meta.updated_at,
+          framework: meta.framework,
+          language: meta.language,
+          last_opened: meta.last_opened,
+          project_icon: meta.project_icon,
+          color: meta.color,
+          tags: meta.tags,
+          status: meta.status
+        }, id, userId);
           
         if (updateErr) {
           console.warn("Supabase project update skipped or fallback used.", updateErr.message || updateErr);
@@ -1732,26 +1790,24 @@ async function startServer() {
       fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
       
       if (supabase && userId && userId !== "offline-sandbox-uuid") {
-        const { error: insertErr } = await supabase
-          .from("projects")
-          .insert({
-            id: newId,
-            user_id: userId,
-            name: meta.name,
-            description: meta.description,
-            is_active: meta.is_active,
-            is_archived: meta.is_archived,
-            is_favorited: meta.is_favorited,
-            created_at: meta.created_at,
-            updated_at: meta.updated_at,
-            framework: meta.framework,
-            language: meta.language,
-            last_opened: meta.last_opened,
-            project_icon: meta.project_icon,
-            color: meta.color,
-            tags: meta.tags,
-            status: meta.status
-          });
+        const { error: insertErr } = await safeInsertProject(supabase, {
+          id: newId,
+          user_id: userId,
+          name: meta.name,
+          description: meta.description,
+          is_active: meta.is_active,
+          is_archived: meta.is_archived,
+          is_favorited: meta.is_favorited,
+          created_at: meta.created_at,
+          updated_at: meta.updated_at,
+          framework: meta.framework,
+          language: meta.language,
+          last_opened: meta.last_opened,
+          project_icon: meta.project_icon,
+          color: meta.color,
+          tags: meta.tags,
+          status: meta.status
+        });
           
         if (!insertErr) {
           const filesList = getWorkspaceFiles(destDir, destDir);
@@ -1879,14 +1935,10 @@ async function startServer() {
         fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
         
         if (supabase && userId && userId !== "offline-sandbox-uuid") {
-          await supabase
-            .from("projects")
-            .update({
-              last_opened: meta.last_opened,
-              updated_at: meta.updated_at
-            })
-            .eq("id", projectId)
-            .eq("user_id", userId);
+          await safeUpdateProject(supabase, {
+            last_opened: meta.last_opened,
+            updated_at: meta.updated_at
+          }, projectId, userId);
         }
       }
       
@@ -2871,26 +2923,24 @@ Please help the user directly with their queries, automatically writing or delet
       
       if (supabase && userId && userId !== "offline-sandbox-uuid") {
         try {
-          await supabase
-            .from("projects")
-            .insert({
-              id: projectId,
-              user_id: userId,
-              name: meta.name,
-              description: meta.description,
-              is_active: meta.is_active,
-              is_archived: meta.is_archived,
-              is_favorited: meta.is_favorited,
-              framework: meta.framework,
-              language: meta.language,
-              last_opened: meta.last_opened,
-              project_icon: meta.project_icon,
-              color: meta.color,
-              tags: meta.tags,
-              status: meta.status,
-              created_at: meta.created_at,
-              updated_at: meta.updated_at
-            });
+          await safeInsertProject(supabase, {
+            id: projectId,
+            user_id: userId,
+            name: meta.name,
+            description: meta.description,
+            is_active: meta.is_active,
+            is_archived: meta.is_archived,
+            is_favorited: meta.is_favorited,
+            framework: meta.framework,
+            language: meta.language,
+            last_opened: meta.last_opened,
+            project_icon: meta.project_icon,
+            color: meta.color,
+            tags: meta.tags,
+            status: meta.status,
+            created_at: meta.created_at,
+            updated_at: meta.updated_at
+          });
         } catch (dbErr: any) {
           console.warn("Supabase ZIP project row skipped or fallback used.", dbErr.message || dbErr);
         }
@@ -4006,6 +4056,7 @@ Please help the user directly with their queries, automatically writing or delet
   });
 
   app.use("/api/agent", agentRouter);
+  app.use("/api/toolkit", toolkitRouter);
 
   // Serve static UI client in production mode, mount Vite in development
 
