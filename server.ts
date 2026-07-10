@@ -310,7 +310,17 @@ async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
       .eq("user_id", userId);
       
     if (error) {
-      console.error("Supabase project sync failed:", error.message || error);
+      console.warn("Supabase project sync warning:", error.message || error);
+      if (error.message && (
+        error.message.includes("Could not find the table") || 
+        error.message.includes("relation") || 
+        error.message.includes("does not exist") ||
+        error.code === "PGRST116" ||
+        error.code === "42P01"
+      )) {
+        console.info("Supabase 'projects' table is not initialized yet. Falling back to local disk storage.");
+        return getProjectsListOnDisk(activeId);
+      }
       throw new Error(`Supabase projects query failed: ${error.message || JSON.stringify(error)}`);
     }
     
@@ -416,8 +426,8 @@ async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
         }
       }
     }
-  } catch (err) {
-    console.error("Error during syncProjects:", err);
+  } catch (err: any) {
+    console.warn("Error during syncProjects:", err.message || err);
   }
   
   return getProjectsListOnDisk(activeId);

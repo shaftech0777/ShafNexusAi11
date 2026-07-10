@@ -2551,96 +2551,162 @@ I was unable to retrieve a response from the active API service. This typically 
   };
 
   const scaffoldSupabaseSchema = async () => {
-    if ((activeDbProvider !== "postgres" && activeDbProvider !== "supabase") || !postgresConnectionString) {
+    if (!postgresConnectionString || postgresConnectionString.includes("your-database-host")) {
       showToast("Please input and save your Postgres Connection String under Database first!", "warn");
       return;
     }
-    const createTablesSql = `CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  role VARCHAR(100),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+    const createTablesSql = `
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. Create profiles table
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    full_name TEXT,
+    role TEXT DEFAULT 'Lead Architect',
+    avatar TEXT DEFAULT '💻',
+    active_theme TEXT DEFAULT 'dark',
+    active_db_provider TEXT DEFAULT 'supabase',
+    postgres_conn_string TEXT,
+    supabase_url TEXT,
+    supabase_anon_key TEXT,
+    supabase_secret_key TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS projects (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID,
-  name VARCHAR(255) NOT NULL,
-  description TEXT,
-  owner VARCHAR(255),
-  status VARCHAR(100) DEFAULT 'active',
-  is_active BOOLEAN DEFAULT false,
-  is_default BOOLEAN DEFAULT false,
-  is_favorited BOOLEAN DEFAULT false,
-  is_archived BOOLEAN DEFAULT false,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- 2. Create projects table
+CREATE TABLE IF NOT EXISTS public.projects (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT false,
+    is_default BOOLEAN DEFAULT false,
+    is_favorited BOOLEAN DEFAULT false,
+    is_archived BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS project_files (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  user_id UUID,
-  name VARCHAR(255) NOT NULL,
-  path TEXT NOT NULL,
-  content TEXT,
-  size BIGINT DEFAULT 0,
-  mime_type VARCHAR(100) DEFAULT 'text/plain',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(project_id, path)
+-- 3. Create project_files table
+CREATE TABLE IF NOT EXISTS public.project_files (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    project_id UUID REFERENCES public.projects ON DELETE CASCADE NOT NULL,
+    user_id UUID NOT NULL,
+    name TEXT NOT NULL,
+    path TEXT NOT NULL,
+    content TEXT,
+    size INTEGER DEFAULT 0,
+    mime_type TEXT DEFAULT 'text/plain',
+    version INTEGER DEFAULT 1,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE (project_id, path)
 );
 
-CREATE TABLE IF NOT EXISTS chat_history (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  user_id UUID,
-  role VARCHAR(50) NOT NULL,
-  content TEXT NOT NULL,
-  timestamp VARCHAR(50),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- 4. Create chat_sessions table
+CREATE TABLE IF NOT EXISTS public.chat_sessions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL,
+    title TEXT DEFAULT 'New Engineering Session' NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS user_api_keys (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
-  provider VARCHAR(50) NOT NULL,
-  api_key TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(user_id, provider)
+-- 5. Create chat_history table
+CREATE TABLE IF NOT EXISTS public.chat_history (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL,
+    session_id UUID REFERENCES public.chat_sessions ON DELETE CASCADE,
+    project_id UUID REFERENCES public.projects ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS profiles (
-  id UUID PRIMARY KEY,
-  full_name VARCHAR(255),
-  role VARCHAR(100),
-  avatar VARCHAR(255),
-  active_theme VARCHAR(50) DEFAULT 'dark',
-  active_db_provider VARCHAR(50) DEFAULT 'supabase',
-  postgres_conn_string TEXT,
-  supabase_url TEXT,
-  supabase_anon_key TEXT,
-  supabase_secret_key TEXT,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- 6. Create user_api_keys table
+CREATE TABLE IF NOT EXISTS public.user_api_keys (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL,
+    provider TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE (user_id, provider)
 );
 
-CREATE TABLE IF NOT EXISTS task_logs (
-  id SERIAL PRIMARY KEY,
-  timestamp VARCHAR(50),
-  service VARCHAR(100),
-  action TEXT,
-  status VARCHAR(50)
+-- 7. Create user_integrations table
+CREATE TABLE IF NOT EXISTS public.user_integrations (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL,
+    integration_name TEXT NOT NULL,
+    token TEXT,
+    repo_name TEXT,
+    branch_name TEXT DEFAULT 'main',
+    config JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE (user_id, integration_name)
 );
 
--- Insert demo developer template row if empty
-INSERT INTO users (name, email, role) 
-VALUES ('Lead Developer', 'user@example.com', 'Lead Architect')
-ON CONFLICT (email) DO NOTHING;`;
+-- 8. Create deployments table
+CREATE TABLE IF NOT EXISTS public.deployments (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL,
+    project_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    deployment_id TEXT,
+    status TEXT NOT NULL DEFAULT 'READY',
+    url TEXT NOT NULL,
+    project_name TEXT NOT NULL,
+    logs TEXT[] DEFAULT '{}'::text[],
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
 
+-- 9. Create activity_logs table
+CREATE TABLE IF NOT EXISTS public.activity_logs (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID NOT NULL,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+`;
+
+    setIsExecutingCommand(true);
     showToast("Provisioning Supabase relational schemas...", "info");
-    await executeTerminalCommand(createTablesSql);
-    showToast("Supabase target Tables (users, projects, task_logs) successfully initialized!", "success");
+    try {
+      const res = await apiFetch(getApiUrl("/api/db/query"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: createTablesSql,
+          connectionString: postgresConnectionString,
+          provider: "postgres"
+        })
+      });
+      const data = await res.json();
+      setIsExecutingCommand(false);
+
+      if (res.ok && data.success) {
+        setTerminalOutputMsg(`[AUTO-SCAFFOLD SUCCESS]\n\nAll required tables successfully initialized in your Supabase PostgreSQL database!\nTables created: profiles, projects, project_files, chat_sessions, chat_history, user_api_keys, user_integrations, deployments, activity_logs`);
+        showToast("Supabase target Tables successfully initialized!", "success");
+        fetchDatabaseTables();
+      } else {
+        setTerminalOutputMsg(`[AUTO-SCAFFOLD FAILED] Error:\n${data.error || "Schema execution failed."}`);
+        showToast(data.error || "Scaffolding failed", "error");
+      }
+    } catch (err: any) {
+      setIsExecutingCommand(false);
+      setTerminalOutputMsg(`[AUTO-SCAFFOLD NETWORK ERROR]:\n${err.message}`);
+      showToast("Scaffolding network request failed", "error");
+    }
   };
 
   // Preset SQL triggers
