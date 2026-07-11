@@ -2,7 +2,6 @@ import { exec } from "child_process";
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
@@ -100,13 +99,17 @@ setGlobalDispatcher(globalAgent);
 let activeProjectId = "default";
 
 let WORKSPACE_DIR = path.join(process.cwd(), "workspace");
-try {
-  const testDir = path.join(process.cwd(), ".write_test_" + crypto.randomUUID());
-  fs.mkdirSync(testDir, { recursive: true });
-  fs.rmdirSync(testDir);
-} catch (e) {
-  console.log("Detected read-only filesystem, switching workspace directory to /tmp/workspace");
+if (process.env.VERCEL || process.env.NODE_ENV === "production") {
   WORKSPACE_DIR = path.join("/tmp", "workspace");
+} else {
+  try {
+    const testDir = path.join(process.cwd(), ".write_test_" + crypto.randomUUID());
+    fs.mkdirSync(testDir, { recursive: true });
+    fs.rmdirSync(testDir);
+  } catch (e) {
+    console.log("Detected read-only filesystem, switching workspace directory to /tmp/workspace");
+    WORKSPACE_DIR = path.join("/tmp", "workspace");
+  }
 }
 
 function getWorkspaceDir(projectId: string): string {
@@ -1536,61 +1539,65 @@ function getWorkspaceFiles(dirPath: string, baseDir: string): VirtualFile[] {
 
 // Helper: Initialize Workspace on Server Startup
 function initWorkspaceLocally(projectId: string = "default") {
-  const dir = getWorkspaceDir(projectId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  for (const file of DEFAULT_FILES) {
-    const fullPath = path.join(dir, file.path);
-    if (!fs.existsSync(fullPath)) {
-      ensureDirectoryExistence(fullPath);
-      fs.writeFileSync(fullPath, file.content, "utf8");
+  try {
+    const dir = getWorkspaceDir(projectId);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
-  }
+    for (const file of DEFAULT_FILES) {
+      const fullPath = path.join(dir, file.path);
+      if (!fs.existsSync(fullPath)) {
+        ensureDirectoryExistence(fullPath);
+        fs.writeFileSync(fullPath, file.content, "utf8");
+      }
+    }
 
-  // Initialize SQLite schema tables immediately on server startup to avoid writes in read routes
-  const dbPath = path.join(dir, "nexus.db");
-  const db = new sqlite3.Database(dbPath);
-  db.serialize(() => {
-    db.run(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        role TEXT NOT NULL DEFAULT 'developer',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS system_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_type TEXT NOT NULL,
-        message TEXT NOT NULL,
-        severity TEXT NOT NULL DEFAULT 'info',
-        logged_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  });
-  db.close();
+    // Initialize SQLite schema tables immediately on server startup to avoid writes in read routes
+    const dbPath = path.join(dir, "nexus.db");
+    const db = new sqlite3.Database(dbPath);
+    db.serialize(() => {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          email TEXT UNIQUE NOT NULL,
+          role TEXT NOT NULL DEFAULT 'developer',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS system_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_type TEXT NOT NULL,
+          message TEXT NOT NULL,
+          severity TEXT NOT NULL DEFAULT 'info',
+          logged_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    });
+    db.close();
 
-  // Scaffold project metadata
-  const metaPath = path.join(dir, "project_metadata.json");
-  if (!fs.existsSync(metaPath)) {
-    const name = projectId === "default" ? "Default Project" : `Project ${projectId.substring(0, 5).toUpperCase()}`;
-    const meta = {
-      id: projectId,
-      name,
-      description: "Local standalone developer environment workspace.",
-      is_active: projectId === "default",
-      is_archived: false,
-      is_favorited: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
+    // Scaffold project metadata
+    const metaPath = path.join(dir, "project_metadata.json");
+    if (!fs.existsSync(metaPath)) {
+      const name = projectId === "default" ? "Default Project" : `Project ${projectId.substring(0, 5).toUpperCase()}`;
+      const meta = {
+        id: projectId,
+        name,
+        description: "Local standalone developer environment workspace.",
+        is_active: projectId === "default",
+        is_archived: false,
+        is_favorited: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
+    }
+  } catch (err) {
+    console.warn(`[initWorkspaceLocally] Gracefully skipped configuration for project "${projectId}" due to filesystem limitations:`, err);
   }
 }
 export const app = express();
+export default app;
 
 initWorkspaceLocally("default");
 
@@ -1619,9 +1626,9 @@ app.use(express.json({ limit: "50mb" }));
       await syncProjectFilesFromDb(projectId, req);
       const dir = getWorkspaceDir(projectId);
       const filesList = getWorkspaceFiles(dir, dir);
-      res.json({ files: filesList });
+      res.json({ success: true, files: filesList, data: filesList });
     } catch (err: any) {
-      res.status(500).json({ error: "Failed to scan physical file workspace", details: err.message });
+      res.status(500).json({ success: false, error: "Failed to scan physical file workspace", details: err.message });
     }
   });
 
@@ -1699,9 +1706,9 @@ app.use(express.json({ limit: "50mb" }));
         content: content || "",
         language: ext === "js" ? "javascript" : ext === "ts" ? "typescript" : ext
       };
-      res.json({ success: true, message: "File saved successfully", file: newFile });
+      res.json({ success: true, message: "File saved successfully", file: newFile, data: newFile });
     } catch (error: any) {
-      res.status(500).json({ error: "Failed to write file to workspace disk", details: error.message });
+      res.status(500).json({ success: false, error: "Failed to write file to workspace disk", details: error.message });
     }
   });
 
@@ -1893,9 +1900,9 @@ app.use(express.json({ limit: "50mb" }));
   app.get("/api/projects", async (req, res) => {
     try {
       const list = await syncProjects(req);
-      res.json({ success: true, projects: list });
+      res.json({ success: true, projects: list, data: list });
     } catch (err: any) {
-      res.status(500).json({ error: "Failed to load projects list", details: err.message });
+      res.status(500).json({ success: false, error: "Failed to load projects list", details: err.message });
     }
   });
 
@@ -1997,10 +2004,10 @@ app.use(express.json({ limit: "50mb" }));
       }
       
       console.log(`[POST /api/projects] [SUCCESS] Project "${meta.name}" successfully created and response dispatched!`);
-      res.json({ success: true, project: meta });
+      res.json({ success: true, project: meta, data: meta });
     } catch (err: any) {
       console.error(`[POST /api/projects] [CRITICAL ERROR] Failed to create project:`, err);
-      res.status(500).json({ error: "Failed to create project", details: err.message });
+      res.status(500).json({ success: false, error: "Failed to create project", details: err.message });
     }
   });
 
@@ -2075,9 +2082,9 @@ app.use(express.json({ limit: "50mb" }));
         }
       }
       
-      res.json({ success: true, project: meta });
+      res.json({ success: true, project: meta, data: meta });
     } catch (err: any) {
-      res.status(500).json({ error: "Failed to update project", details: err.message });
+      res.status(500).json({ success: false, error: "Failed to update project", details: err.message });
     }
   });
 
@@ -2249,9 +2256,9 @@ app.use(express.json({ limit: "50mb" }));
         }
       }
       
-      res.json({ success: true, message: "Project and all associated workspace items deleted successfully" });
+      res.json({ success: true, message: "Project and all associated workspace items deleted successfully", data: { id } });
     } catch (err: any) {
-      res.status(500).json({ error: "Failed to delete project", details: err.message });
+      res.status(500).json({ success: false, error: "Failed to delete project", details: err.message });
     }
   });
 
@@ -2777,6 +2784,7 @@ When responding:
         console.error(`[AI ROUTER] Provider "${apiProvider}" execution failed completely.`, err);
         const errMsg = err?.message || String(err);
         return res.status(400).json({
+          success: false,
           error: `API call failed for provider ${apiProvider.toUpperCase()}`,
           userFriendlyHint: `The ${apiProvider.toUpperCase()} AI service returned an error: "${errMsg}". Please check that your key is active, has sufficient credits, and is configured correctly in Settings.`
         });
@@ -2867,9 +2875,11 @@ When responding:
     const updatedFiles = getWorkspaceFiles(dir, dir);
 
     res.json({
+      success: true,
       text: cleanReplyText,
       files: updatedFiles,
-      simulated: false
+      simulated: false,
+      data: { text: cleanReplyText, files: updatedFiles }
     });
   });
 
@@ -3550,10 +3560,10 @@ When responding:
   });
 
   // GITHUB CLONE & PULL/SYNC ACTION
-  app.post("/api/git/clone", async (req, res) => {
+  const handleGitClone = async (req: express.Request, res: express.Response) => {
     const { repoName, branch, token } = req.body;
     if (!repoName || !repoName.includes("/")) {
-      return res.status(400).json({ error: "Invalid repository format. Should be owner/repo." });
+      return res.status(400).json({ success: false, error: "Invalid repository format. Should be owner/repo." });
     }
     const [owner, repo] = repoName.split("/");
     const logs: string[] = [`[Git Handshake] Connecting live to https://api.github.com/repos/${owner}/${repo}...`];
@@ -3580,7 +3590,7 @@ When responding:
             errMsg = errJSON.message;
           }
         } catch (_) {}
-        return res.status(zipRes.status).json({ error: `GitHub API Error (${zipRes.status}): ${errMsg}` });
+        return res.status(zipRes.status).json({ success: false, error: `GitHub API Error (${zipRes.status}): ${errMsg}`, logs });
       }
       
       const projectId = getProjId(req);
@@ -3681,12 +3691,21 @@ When responding:
       }
       
       logs.push(`[Git Sync Complete] Cloned & initialized ${filesList.length} files to active workspace.`);
-      res.json({ success: true, message: `Successfully cloned ${owner}/${repo}@${targetBranch}`, logs, files: filesList });
+      res.json({
+        success: true,
+        message: `Successfully cloned ${owner}/${repo}@${targetBranch}`,
+        logs,
+        files: filesList,
+        data: { logs, files: filesList }
+      });
     } catch (err: any) {
       console.error("Git Sync / Clone Error:", err);
-      res.status(500).json({ error: err.message, logs });
+      res.status(500).json({ success: false, error: err.message, logs });
     }
-  });
+  };
+
+  app.post("/api/git/clone", handleGitClone);
+  app.post("/api/git/sync", handleGitClone);
 
   // GIT COMMIT METADATA ACTION
   app.post("/api/git/commit", async (req, res) => {
@@ -3893,7 +3912,7 @@ When responding:
         }
       }
 
-      return res.json({ success: true, deployment: newDeployment });
+      return res.json({ success: true, deployment: newDeployment, data: newDeployment });
     }
 
     const logs: string[] = [`[Deployer Handshake] Initiating connection routes to ${provider}...`];
@@ -3969,7 +3988,7 @@ When responding:
           }
         }
 
-        return res.json({ success: true, deployment: newDeployment });
+        return res.json({ success: true, deployment: newDeployment, data: newDeployment });
 
       } else if (provider.toLowerCase() === "netlify") {
         logs.push(`[Netlify] Querying available sites...`);
@@ -4451,30 +4470,32 @@ When responding:
   app.use("/api/agent", agentRouter);
   app.use("/api/toolkit", toolkitRouter);
 
-  // Serve static UI client in production mode, mount Vite in development
-
-async function initializeServerEnv() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-
-  if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Nexus AI local server ready on port ${PORT}`);
-    });
-  }
+  // Serve static UI client in production mode (synchronously), mount Vite in development (asynchronously)
+if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+  const distPath = path.join(process.cwd(), "dist");
+  app.use(express.static(distPath));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+} else {
+  const initDevVite = async () => {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch (err) {
+      console.error("Error starting dev Vite server:", err);
+    }
+  };
+  initDevVite();
 }
 
-initializeServerEnv();
+if (!process.env.VERCEL) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Nexus AI local server ready on port ${PORT}`);
+  });
+}
 

@@ -5333,7 +5333,7 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
   // ---------------------------------------------------------------------------
   if (!currentProjectId) {
     return (
-      <div className={`min-h-screen w-full flex flex-col font-sans transition-colors ${!isDarkMode ? "bg-slate-50 text-slate-900" : "bg-[#0A0B10] text-[#E2E8F0]"}`}>
+      <div className={`h-screen max-h-screen overflow-hidden w-full flex flex-col font-sans transition-colors ${!isDarkMode ? "bg-slate-50 text-slate-900" : "bg-[#0A0B10] text-[#E2E8F0]"}`}>
         {/* Fullscreen Dashboard Header */}
         <header className={`h-16 border-b flex items-center justify-between px-6 shrink-0 transition-colors ${!isDarkMode ? "bg-white border-slate-200 shadow-sm" : "bg-[#0E1015] border-[#2D3039]"}`}>
           <div className="flex items-center gap-3">
@@ -5362,7 +5362,7 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
         </header>
 
         {/* Dashboard Content */}
-        <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10 flex flex-col gap-8 overflow-y-auto">
+        <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10 flex flex-col gap-8 overflow-y-auto min-h-0">
           {/* Hero Section */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-[#2D3039]/50">
             <div>
