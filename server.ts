@@ -16,6 +16,14 @@ import toolkitRouter from "./server/toolkit";
 // Load environment variables from .env
 dotenv.config();
 
+// Secure Vercel Serverless Function process from crash-on-exception
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("CRITICAL PROD WARNING: Unhandled Promise Rejection at:", promise, "reason:", reason);
+});
+process.on("uncaughtException", (err, origin) => {
+  console.error("CRITICAL PROD WARNING: Uncaught Exception:", err, "origin:", origin);
+});
+
 const defaultUrl = "https://rgckgffhihgqnhwiocgh.supabase.co";
 const defaultKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnY2tnZmZoaWhncW5od2lvY2doIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0OTQ3MDIsImV4cCI6MjA5NzA3MDcwMn0.WHCtpezypJ5dy6iX5c9pjmTsJC3DkC1dpf0AtNXI0pU";
 
@@ -4476,6 +4484,16 @@ When responding:
 
   app.use("/api/agent", agentRouter);
   app.use("/api/toolkit", toolkitRouter);
+
+  // Centralized Error-Handling Middleware
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(`[API ERROR] Error on route ${req.method} ${req.url}:`, err);
+    res.status(err.status || 500).json({
+      success: false,
+      error: err.message || "An unexpected error occurred during API processing",
+      route: `${req.method} ${req.originalUrl || req.url}`
+    });
+  });
 
   // Serve static UI client in production mode (synchronously), mount Vite in development (asynchronously)
 if (process.env.NODE_ENV === "production" || process.env.VERCEL) {

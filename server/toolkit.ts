@@ -6,7 +6,10 @@ import { Client } from "pg";
 
 const router = express.Router();
 
-const WORKSPACE_DIR = path.join(process.cwd(), "workspace");
+let WORKSPACE_DIR = path.join(process.cwd(), "workspace");
+if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+  WORKSPACE_DIR = path.join("/tmp", "workspace");
+}
 
 // Helper to get workspace dir of active project
 function getWorkspaceDir(projectId: string): string {
