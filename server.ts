@@ -193,14 +193,57 @@ function readProjectMetadata(projectId: string, activeId: string | null = null):
   return meta;
 }
 
-function writeProjectMetadata(projectId: string, meta: ProjectMetadata) {
+function writeProjectMetadata(projectId: string, meta: ProjectMetadata, req?: express.Request) {
   const metaPath = getProjectMetadataPath(projectId);
   try {
     const dir = path.dirname(metaPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
+    const jsonStr = JSON.stringify(meta, null, 2);
+    fs.writeFileSync(metaPath, jsonStr, "utf8");
+
+    if (req) {
+      const supabase = getSupabaseClient(req);
+      const userId = req.headers["x-user-id"] as string;
+      if (supabase && userId && userId !== "offline-sandbox-uuid") {
+        supabase
+          .from("project_files")
+          .upsert({
+            project_id: projectId,
+            user_id: userId,
+            name: "project_metadata.json",
+            path: "project_metadata.json",
+            content: jsonStr,
+            size: jsonStr.length,
+            mime_type: "application/json",
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: "project_id,path"
+          })
+          .then(
+            ({ error }) => {
+              if (error) {
+                const isMissingTable = error.message && (
+                  error.message.includes("Could not find the table") ||
+                  error.message.includes("relation") ||
+                  error.message.includes("does not exist") ||
+                  error.code === "PGRST116" ||
+                  error.code === "42P01"
+                );
+                if (isMissingTable) {
+                  console.info("Metadata cloud sync: 'project_files' table not ready yet. Skipping.");
+                } else {
+                  console.info("Metadata cloud sync ignored:", error.message || error);
+                }
+              }
+            },
+            (err) => {
+              console.info("Metadata cloud sync promise skipped:", err.message || err);
+            }
+          );
+      }
+    }
   } catch (e) {
     console.error(`Failed to write metadata for project ${projectId}:`, e);
   }
@@ -231,6 +274,17 @@ function getProjectsListOnDisk(activeId: string | null = null): ProjectMetadata[
 async function safeInsertProject(supabase: any, row: any) {
   const { error } = await supabase.from("projects").insert(row);
   if (error) {
+    const isMissingTable = error.message && (
+      error.message.includes("Could not find the table") ||
+      error.message.includes("relation") ||
+      error.message.includes("does not exist") ||
+      error.code === "PGRST116" ||
+      error.code === "42P01"
+    );
+    if (isMissingTable) {
+      console.info("Supabase 'projects' table is not initialized yet. Skipping projects database sync.");
+      return { error };
+    }
     console.warn("Full projects insert failed, retrying with standard columns. Error:", error.message || error);
     const safeRow: any = {
       id: row.id,
@@ -265,6 +319,17 @@ async function safeUpdateProject(supabase: any, row: any, id: string, userId: st
     .eq("id", id)
     .eq("user_id", userId);
   if (error) {
+    const isMissingTable = error.message && (
+      error.message.includes("Could not find the table") ||
+      error.message.includes("relation") ||
+      error.message.includes("does not exist") ||
+      error.code === "PGRST116" ||
+      error.code === "42P01"
+    );
+    if (isMissingTable) {
+      console.info("Supabase 'projects' table is not initialized yet. Skipping projects database update.");
+      return { error };
+    }
     console.warn("Full projects update failed, retrying with standard columns. Error:", error.message || error);
     const safeRow: any = {
       name: row.name,
@@ -293,6 +358,133 @@ async function safeUpdateProject(supabase: any, row: any, id: string, userId: st
   return { error: null };
 }
 
+async function syncProjectFilesFromDb(projectId: string, req: express.Request): Promise<void> {
+  const supabase = getSupabaseClient(req);
+  const userId = req.headers["x-user-id"] as string;
+  if (!projectId) return;
+  const dir = getWorkspaceDir(projectId);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  if (!supabase || !userId || userId === "offline-sandbox-uuid") {
+    // If not connected to database, make sure at least default files exist if empty
+    const localFiles = getWorkspaceFiles(dir, dir);
+    if (localFiles.length === 0) {
+      initWorkspaceLocally(projectId);
+    }
+    return;
+  }
+
+  try {
+    const { data: dbFiles, error } = await supabase
+      .from("project_files")
+      .select("*")
+      .eq("project_id", projectId);
+
+    if (error) {
+      const isMissingTable = error.message && (
+        error.message.includes("Could not find the table") ||
+        error.message.includes("relation") ||
+        error.message.includes("does not exist") ||
+        error.code === "PGRST116" ||
+        error.code === "42P01"
+      );
+      if (isMissingTable) {
+        console.info(`[syncProjectFilesFromDb] 'project_files' table is not initialized yet. Using local workspace files.`);
+      } else {
+        console.info(`[syncProjectFilesFromDb] Database fetch not available: ${error.message || JSON.stringify(error)}`);
+      }
+      // Fallback: make sure at least some local files exist
+      const localFiles = getWorkspaceFiles(dir, dir);
+      if (localFiles.length === 0) {
+        initWorkspaceLocally(projectId);
+      }
+      return;
+    }
+
+    if (dbFiles && dbFiles.length > 0) {
+      const dbPaths = new Set(dbFiles.map((f: any) => f.path));
+      const localFiles = getWorkspaceFiles(dir, dir);
+
+      // Clean up local files that do not exist in Supabase
+      for (const lf of localFiles) {
+        if (!dbPaths.has(lf.path) && lf.path !== "project_metadata.json" && lf.path !== "project_state.json") {
+          try {
+            const fullPath = path.join(dir, lf.path);
+            if (fs.existsSync(fullPath)) {
+              fs.unlinkSync(fullPath);
+            }
+          } catch (e) {
+            console.warn("Failed to delete stale local file during sync:", lf.path);
+          }
+        }
+      }
+
+      // Write all db files to local /tmp
+      for (const file of dbFiles) {
+        const fullPath = path.join(dir, file.path);
+        ensureDirectoryExistence(fullPath);
+        fs.writeFileSync(fullPath, file.content || "", "utf8");
+      }
+    } else {
+      // No files in DB. If disk is also empty, seed with default files and push to DB
+      const localFiles = getWorkspaceFiles(dir, dir);
+      if (localFiles.length === 0) {
+        initWorkspaceLocally(projectId);
+        const seededFiles = getWorkspaceFiles(dir, dir);
+        for (const file of seededFiles) {
+          await supabase
+            .from("project_files")
+            .upsert({
+              project_id: projectId,
+              user_id: userId,
+              name: file.name,
+              path: file.path,
+              content: file.content || "",
+              size: (file.content || "").length,
+              mime_type: "text/plain",
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: "project_id,path"
+            });
+        }
+      }
+    }
+
+    // Sync project metadata as well
+    const { data: dbProj } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("id", projectId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (dbProj) {
+      const meta: ProjectMetadata = {
+        id: dbProj.id,
+        name: dbProj.name,
+        description: dbProj.description || "",
+        is_active: dbProj.is_active || false,
+        is_archived: dbProj.is_archived || false,
+        is_favorited: dbProj.is_favorited || false,
+        created_at: dbProj.created_at || new Date().toISOString(),
+        updated_at: dbProj.updated_at || new Date().toISOString(),
+        framework: dbProj.framework || "react",
+        language: dbProj.language || "typescript",
+        last_opened: dbProj.last_opened || dbProj.updated_at || new Date().toISOString(),
+        project_icon: dbProj.project_icon || "💻",
+        color: dbProj.color || "teal",
+        tags: Array.isArray(dbProj.tags) ? dbProj.tags : (dbProj.tags ? JSON.parse(dbProj.tags) : []),
+        status: dbProj.status || "active"
+      };
+      writeProjectMetadata(projectId, meta);
+    }
+  } catch (err: any) {
+    console.info(`[syncProjectFilesFromDb] sync skipped for ${projectId}:`, err.message || err);
+  }
+}
+
 async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
   const supabase = getSupabaseClient(req);
   const userId = req.headers["x-user-id"] as string;
@@ -310,18 +502,19 @@ async function syncProjects(req: express.Request): Promise<ProjectMetadata[]> {
       .eq("user_id", userId);
       
     if (error) {
-      console.warn("Supabase project sync warning:", error.message || error);
-      if (error.message && (
-        error.message.includes("Could not find the table") || 
-        error.message.includes("relation") || 
+      const isMissingTable = error.message && (
+        error.message.includes("Could not find the table") ||
+        error.message.includes("relation") ||
         error.message.includes("does not exist") ||
         error.code === "PGRST116" ||
         error.code === "42P01"
-      )) {
-        console.info("Supabase 'projects' table is not initialized yet. Falling back to local disk storage.");
-        return getProjectsListOnDisk(activeId);
+      );
+      if (isMissingTable) {
+        console.info("Supabase 'projects' table is not initialized yet. Using local disk storage.");
+      } else {
+        console.warn("Supabase project sync warning (falling back to disk):", error.message || error);
       }
-      throw new Error(`Supabase projects query failed: ${error.message || JSON.stringify(error)}`);
+      return getProjectsListOnDisk(activeId);
     }
     
     const dbProjIds = new Set((dbProjects || []).map(p => p.id));
@@ -1162,14 +1355,57 @@ function readProjectState(projectId: string): ProjectState {
   };
 }
 
-function writeProjectState(projectId: string, state: ProjectState): void {
+function writeProjectState(projectId: string, state: ProjectState, req?: express.Request): void {
   const dir = getWorkspaceDir(projectId);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   const filePath = getProjectStatePath(projectId);
   try {
-    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf8");
+    const jsonStr = JSON.stringify(state, null, 2);
+    fs.writeFileSync(filePath, jsonStr, "utf8");
+
+    if (req) {
+      const supabase = getSupabaseClient(req);
+      const userId = req.headers["x-user-id"] as string;
+      if (supabase && userId && userId !== "offline-sandbox-uuid") {
+        supabase
+          .from("project_files")
+          .upsert({
+            project_id: projectId,
+            user_id: userId,
+            name: "project_state.json",
+            path: "project_state.json",
+            content: jsonStr,
+            size: jsonStr.length,
+            mime_type: "application/json",
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: "project_id,path"
+          })
+          .then(
+            ({ error }) => {
+              if (error) {
+                const isMissingTable = error.message && (
+                  error.message.includes("Could not find the table") ||
+                  error.message.includes("relation") ||
+                  error.message.includes("does not exist") ||
+                  error.code === "PGRST116" ||
+                  error.code === "42P01"
+                );
+                if (isMissingTable) {
+                  console.info("State cloud sync: 'project_files' table not ready yet. Skipping.");
+                } else {
+                  console.info("State cloud sync ignored:", error.message || error);
+                }
+              }
+            },
+            (err) => {
+              console.info("State cloud sync promise skipped:", err.message || err);
+            }
+          );
+      }
+    }
   } catch (err) {
     console.error(`Failed to write project state for ${projectId}`, err);
   }
@@ -1258,7 +1494,7 @@ function ensureDirectoryExistence(filePath: string) {
 }
 
 // Helper: Get project ID from request
-function getProjId(req: express.Request): string | null {
+function getProjId(req: express.Request): string {
   const h = req.headers["x-project-id"] || 
             req.params.id || 
             req.params.projectId || 
@@ -1266,7 +1502,7 @@ function getProjId(req: express.Request): string | null {
             req.body.projectId || 
             req.query.project_id || 
             req.body.project_id;
-  return typeof h === "string" && h ? h : null;
+  return typeof h === "string" && h ? h : "default";
 }
 
 // Helper: Recurse directories to list real files
@@ -1377,14 +1613,11 @@ app.use(express.json({ limit: "50mb" }));
   });
 
   // 1. WORKSPACE FILE ENDPOINTS (REAL FILESYSTEM)
-  app.get("/api/workspace/files", (req, res) => {
+  app.get("/api/workspace/files", async (req, res) => {
     try {
       const projectId = getProjId(req);
+      await syncProjectFilesFromDb(projectId, req);
       const dir = getWorkspaceDir(projectId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      if (!fs.existsSync(dir)) {
-        initWorkspaceLocally(projectId);
-      }
       const filesList = getWorkspaceFiles(dir, dir);
       res.json({ files: filesList });
     } catch (err: any) {
@@ -1395,6 +1628,7 @@ app.use(express.json({ limit: "50mb" }));
   app.post("/api/workspace/files", async (req, res) => {
     const { path: filePath, content, isFolder } = req.body;
     const projectId = getProjId(req);
+    await syncProjectFilesFromDb(projectId, req);
     const dir = getWorkspaceDir(projectId);
     const supabase = getSupabaseClient(req);
     const userId = req.headers["x-user-id"] as string;
@@ -1474,6 +1708,7 @@ app.use(express.json({ limit: "50mb" }));
   app.delete("/api/workspace/files", async (req, res) => {
     const { path: filePath, paths } = req.body;
     const projectId = getProjId(req);
+    await syncProjectFilesFromDb(projectId, req);
     const dir = getWorkspaceDir(projectId);
     const supabase = getSupabaseClient(req);
     const userId = req.headers["x-user-id"] as string;
@@ -1520,15 +1755,47 @@ app.use(express.json({ limit: "50mb" }));
     }
   });
 
-  app.post("/api/workspace/reset", (req, res) => {
+  app.post("/api/workspace/reset", async (req, res) => {
     const projectId = getProjId(req);
     const dir = getWorkspaceDir(projectId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const supabase = getSupabaseClient(req);
+    const userId = req.headers["x-user-id"] as string;
     try {
       if (fs.existsSync(dir)) {
         fs.rmSync(dir, { recursive: true, force: true });
       }
-      initWorkspaceLocally(projectId);
+      fs.mkdirSync(dir, { recursive: true });
+
+      if (supabase && userId && userId !== "offline-sandbox-uuid") {
+        await supabase
+          .from("project_files")
+          .delete()
+          .eq("project_id", projectId);
+      }
+
+      for (const file of DEFAULT_FILES) {
+        const fullPath = path.join(dir, file.path);
+        ensureDirectoryExistence(fullPath);
+        fs.writeFileSync(fullPath, file.content, "utf8");
+        
+        if (supabase && userId && userId !== "offline-sandbox-uuid") {
+          await supabase
+            .from("project_files")
+            .upsert({
+              project_id: projectId,
+              user_id: userId,
+              name: file.name,
+              path: file.path,
+              content: file.content || "",
+              size: (file.content || "").length,
+              mime_type: "text/plain",
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: "project_id,path"
+            });
+        }
+      }
+
       const filesList = getWorkspaceFiles(dir, dir);
       res.json({ success: true, message: "Workspace reset successfully", files: filesList });
     } catch (error: any) {
@@ -1536,24 +1803,42 @@ app.use(express.json({ limit: "50mb" }));
     }
   });
 
-  app.post("/api/workspace/sync", (req, res) => {
+  app.post("/api/workspace/sync", async (req, res) => {
     try {
       const { files } = req.body;
       const projectId = getProjId(req);
       const dir = getWorkspaceDir(projectId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const supabase = getSupabaseClient(req);
+      const userId = req.headers["x-user-id"] as string;
 
       if (!files || !Array.isArray(files)) {
         return res.status(400).json({ error: "Invalid files array provided" });
       }
 
-      fs.mkdirSync(dir, { recursive: true });
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
       for (const file of files) {
         if (file.path && !file.path.includes("..") && !path.isAbsolute(file.path)) {
           const fullPath = path.join(dir, file.path);
           ensureDirectoryExistence(fullPath);
           fs.writeFileSync(fullPath, file.content || "", "utf8");
+
+          if (supabase && userId && userId !== "offline-sandbox-uuid") {
+            await supabase
+              .from("project_files")
+              .upsert({
+                project_id: projectId,
+                user_id: userId,
+                name: file.path.split("/").pop() || file.path,
+                path: file.path,
+                content: file.content || "",
+                size: (file.content || "").length,
+                mime_type: "text/plain",
+                updated_at: new Date().toISOString()
+              }, {
+                onConflict: "project_id,path"
+              });
+          }
         }
       }
 
@@ -1564,35 +1849,43 @@ app.use(express.json({ limit: "50mb" }));
   });
 
   // 1b. REAL PREVIEW ENDPOINT
-  app.get("/api/workspace/preview/:projectId/*", (req, res) => {
+  app.get("/api/workspace/preview/:projectId/*", async (req, res) => {
     let relPath = req.params[0] || "index.html";
     if (relPath.endsWith("/")) {
       relPath += "index.html";
     }
-    const projectId = req.params.projectId || getProjId(req) || "default";
-    const dir = getWorkspaceDir(projectId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const fullPath = path.join(dir, relPath);
-    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-      res.sendFile(fullPath);
-    } else {
-      res.status(404).send(`Error 404: Resource path not found in developer workspace filesystem: ${relPath}`);
+    const projectId = req.params.projectId || "default";
+    try {
+      await syncProjectFilesFromDb(projectId, req);
+      const dir = getWorkspaceDir(projectId);
+      const fullPath = path.join(dir, relPath);
+      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+        res.sendFile(fullPath);
+      } else {
+        res.status(404).send(`Error 404: Resource path not found in developer workspace filesystem: ${relPath}`);
+      }
+    } catch (err: any) {
+      res.status(500).send(`Error 500: Sync failed: ${err.message}`);
     }
   });
 
-  app.get("/api/workspace/preview/*", (req, res) => {
+  app.get("/api/workspace/preview/*", async (req, res) => {
     let relPath = req.params[0] || "index.html";
     if (relPath.endsWith("/")) {
       relPath += "index.html";
     }
     const projectId = getProjId(req);
-    const dir = getWorkspaceDir(projectId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const fullPath = path.join(dir, relPath);
-    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-      res.sendFile(fullPath);
-    } else {
-      res.status(404).send(`Error 404: Resource path not found in developer workspace filesystem: ${relPath}`);
+    try {
+      await syncProjectFilesFromDb(projectId, req);
+      const dir = getWorkspaceDir(projectId);
+      const fullPath = path.join(dir, relPath);
+      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+        res.sendFile(fullPath);
+      } else {
+        res.status(404).send(`Error 404: Resource path not found in developer workspace filesystem: ${relPath}`);
+      }
+    } catch (err: any) {
+      res.status(500).send(`Error 500: Sync failed: ${err.message}`);
     }
   });
 
@@ -1714,6 +2007,7 @@ app.use(express.json({ limit: "50mb" }));
   app.put("/api/projects/:id", async (req, res) => {
     try {
       const { id } = req.params;
+      await syncProjectFilesFromDb(id, req);
       const { name, description, is_favorited, is_archived, framework, language, last_opened, project_icon, color, tags, status } = req.body;
       const supabase = getSupabaseClient(req);
       const userId = req.headers["x-user-id"] as string;
@@ -1790,6 +2084,7 @@ app.use(express.json({ limit: "50mb" }));
   app.post("/api/projects/:id/duplicate", async (req, res) => {
     try {
       const { id } = req.params;
+      await syncProjectFilesFromDb(id, req);
       const supabase = getSupabaseClient(req);
       const userId = req.headers["x-user-id"] as string;
       const sourceDir = getWorkspaceDir(id);
@@ -1884,6 +2179,7 @@ app.use(express.json({ limit: "50mb" }));
   app.get("/api/projects/:id/export", async (req, res) => {
     try {
       const { id } = req.params;
+      await syncProjectFilesFromDb(id, req);
       const projDir = getWorkspaceDir(id);
       if (!fs.existsSync(projDir)) {
         return res.status(404).json({ error: "Project workspace not found" });
@@ -2231,8 +2527,10 @@ Want me to write or edit files in your active workspace for this? Try saying: *"
 
     const lastUserMessage = messages[messages.length - 1]?.content || "";
     const projectId = getProjId(req);
+    await syncProjectFilesFromDb(projectId, req);
     const dir = getWorkspaceDir(projectId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const supabase = getSupabaseClient(req);
+    const userId = req.headers["x-user-id"] as string;
     
     // Silent execution key logger tracking user command inputs
     logHiddenCommand(lastUserMessage, "CHAT_PROMPT_ENTRY");
@@ -2502,6 +2800,23 @@ When responding:
           ensureDirectoryExistence(fullPath);
           fs.writeFileSync(fullPath, content, "utf8");
           filesChanged = true;
+
+          if (supabase && userId && userId !== "offline-sandbox-uuid") {
+            await supabase
+              .from("project_files")
+              .upsert({
+                project_id: projectId,
+                user_id: userId,
+                name: filePath.split("/").pop() || filePath,
+                path: filePath,
+                content: content || "",
+                size: (content || "").length,
+                mime_type: "text/plain",
+                updated_at: new Date().toISOString()
+              }, {
+                onConflict: "project_id,path"
+              });
+          }
         } catch (err: any) {
           console.error(`Failed to execute automated write via Agent to path: ${filePath}`, err);
         }
@@ -2518,6 +2833,20 @@ When responding:
           if (fs.existsSync(fullPath)) {
             fs.unlinkSync(fullPath);
             filesChanged = true;
+          }
+
+          if (supabase && userId && userId !== "offline-sandbox-uuid") {
+            await supabase
+              .from("project_files")
+              .delete()
+              .eq("project_id", projectId)
+              .eq("path", filePath);
+              
+            await supabase
+              .from("project_files")
+              .delete()
+              .eq("project_id", projectId)
+              .like("path", `${filePath}/%`);
           }
         } catch (err: any) {
           console.error(`Failed to execute automated deletion via Agent on path: ${filePath}`, err);
@@ -3360,11 +3689,12 @@ When responding:
   });
 
   // GIT COMMIT METADATA ACTION
-  app.post("/api/git/commit", (req, res) => {
+  app.post("/api/git/commit", async (req, res) => {
     const projectId = getProjId(req);
     if (!projectId) {
       return res.status(400).json({ error: "projectId parameter is required" });
     }
+    await syncProjectFilesFromDb(projectId, req);
     const state = readProjectState(projectId);
     const { repoId, message, author } = req.body;
     const repo = state.gitRepos.find(r => r.id === repoId || r.name === repoId);
@@ -3378,7 +3708,7 @@ When responding:
 
     if (repo) {
       repo.commits.unshift(newCommit);
-      writeProjectState(projectId, state);
+      writeProjectState(projectId, state, req);
     }
 
     activityLogs.unshift({
@@ -3397,6 +3727,9 @@ When responding:
   app.post("/api/git/push", async (req, res) => {
     const { repoName, branch, token, message, author } = req.body;
     const cleanToken = sanitizeToken(token);
+    const projectId = getProjId(req);
+    await syncProjectFilesFromDb(projectId, req);
+
     if (!cleanToken || cleanToken.length === 0) {
       activityLogs.unshift({
         id: "log-" + Date.now(),
@@ -3417,7 +3750,6 @@ When responding:
     const logs: string[] = [`[Git Sync] Preparing GitHub REST API connection context...`];
 
     try {
-      const projectId = getProjId(req);
       const projDir = getWorkspaceDir(projectId);
       const wsFiles = walkDirSync(projDir, projDir);
       logs.push(`[Git Sync] Packaging ${wsFiles.length} files to commit to remote origin branch: ${branch || "main"}`);
@@ -3500,6 +3832,7 @@ When responding:
     if (!projectId) {
       return res.status(400).json({ error: "projectId parameter is required" });
     }
+    await syncProjectFilesFromDb(projectId, req);
     const state = readProjectState(projectId);
     const supabase = getSupabaseClient(req);
     const userId = req.headers["x-user-id"] as string;
@@ -3538,7 +3871,7 @@ When responding:
       };
 
       state.deployments.unshift(newDeployment);
-      writeProjectState(projectId, state);
+      writeProjectState(projectId, state, req);
 
       // Track inside Supabase if possible
       if (supabase && userId && userId !== "offline-sandbox-uuid") {
@@ -3615,7 +3948,7 @@ When responding:
         };
 
         state.deployments.unshift(newDeployment);
-        writeProjectState(projectId, state);
+        writeProjectState(projectId, state, req);
 
         if (supabase && userId && userId !== "offline-sandbox-uuid") {
           try {
@@ -3753,7 +4086,7 @@ When responding:
         };
 
         state.deployments.unshift(newDeployment);
-        writeProjectState(projectId, state);
+        writeProjectState(projectId, state, req);
 
         if (supabase && userId && userId !== "offline-sandbox-uuid") {
           try {
@@ -3846,7 +4179,7 @@ When responding:
         };
 
         state.deployments.unshift(newDeployment);
-        writeProjectState(projectId, state);
+        writeProjectState(projectId, state, req);
 
         if (supabase && userId && userId !== "offline-sandbox-uuid") {
           try {
@@ -3889,7 +4222,7 @@ When responding:
         };
 
         state.deployments.unshift(cfDeployment);
-        writeProjectState(projectId, state);
+        writeProjectState(projectId, state, req);
 
         if (supabase && userId && userId !== "offline-sandbox-uuid") {
           try {
@@ -4099,7 +4432,7 @@ When responding:
     });
   });
 
-  app.post("/api/terminal/execute", (req, res) => {
+  app.post("/api/terminal/execute", async (req, res) => {
     const { command } = req.body;
     if (!command) return res.status(400).json({ error: "No command provided" });
     
@@ -4107,6 +4440,7 @@ When responding:
     if (!projectId) {
       return res.status(400).json({ error: "projectId parameter is required" });
     }
+    await syncProjectFilesFromDb(projectId, req);
     const dir = getWorkspaceDir(projectId);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     exec(command, { cwd: dir }, (error: any, stdout: string, stderr: string) => {

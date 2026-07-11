@@ -19,6 +19,24 @@ export function maskKey(key: string): string {
   return "•".repeat(key.length - 4) + key.slice(-4);
 }
 
+// Helper to log database errors gracefully
+function logDatabaseError(prefix: string, error: any): void {
+  if (!error) return;
+  const msg = error.message || String(error);
+  const isMissingTable = (
+    msg.includes("Could not find the table") ||
+    msg.includes("relation") ||
+    msg.includes("does not exist") ||
+    error.code === "PGRST116" ||
+    error.code === "42P01"
+  );
+  if (isMissingTable) {
+    console.info(`${prefix} (Table not ready, skipping/using fallback):`, msg);
+  } else {
+    console.info(`${prefix} (Database bypassed/skipping):`, msg);
+  }
+}
+
 // 1. Get Active Provider selection
 export async function getActiveProvider(userId: string | null): Promise<string> {
   if (isSupabaseConfigured && supabase && userId) {
@@ -32,7 +50,7 @@ export async function getActiveProvider(userId: string | null): Promise<string> 
         return data.active_provider;
       }
     } catch (e) {
-      console.error("[UserService] Failed to fetch active provider from Supabase:", e);
+      logDatabaseError("[UserService] Failed to fetch active provider from Supabase", e);
     }
   }
   return localStorage.getItem("NEXUS_ACTIVE_PROVIDER") || "gemini";
@@ -52,7 +70,7 @@ export async function setActiveProvider(userId: string | null, provider: string)
         });
       if (error) throw error;
     } catch (e) {
-      console.error("[UserService] Failed to upsert active provider to Supabase:", e);
+      logDatabaseError("[UserService] Failed to upsert active provider to Supabase", e);
     }
   }
 }
@@ -75,7 +93,7 @@ export async function getUserApiKeys(userId: string | null): Promise<{ [provider
         return keys;
       }
     } catch (e) {
-      console.error("[UserService] Failed to load keys from Supabase:", e);
+      logDatabaseError("[UserService] Failed to load keys from Supabase", e);
     }
   }
 
@@ -172,7 +190,7 @@ export async function loadChatHistory(userId: string | null, projectId?: string 
         return data as ChatHistoryMessage[];
       }
     } catch (e) {
-      console.error("[UserService] Failed to load chat history from Supabase:", e);
+      logDatabaseError("[UserService] Failed to load chat history from Supabase", e);
     }
   }
 
@@ -214,7 +232,7 @@ export async function saveChatMessage(
         });
       if (error) throw error;
     } catch (e) {
-      console.error("[UserService] Failed to insert chat message to Supabase:", e);
+      logDatabaseError("[UserService] Failed to insert chat message to Supabase", e);
     }
   }
 }
@@ -237,7 +255,7 @@ export async function clearChatHistory(userId: string | null, projectId?: string
       const { error } = await query;
       if (error) throw error;
     } catch (e) {
-      console.error("[UserService] Failed to clear chat history from Supabase:", e);
+      logDatabaseError("[UserService] Failed to clear chat history from Supabase", e);
     }
   }
 }
@@ -255,7 +273,7 @@ export async function getUserProfile(userId: string | null): Promise<any> {
         return data;
       }
     } catch (e) {
-      console.error("[UserService] Failed to load user profile:", e);
+      logDatabaseError("[UserService] Failed to load user profile", e);
     }
   }
   return {
@@ -295,7 +313,7 @@ export async function saveUserProfile(userId: string | null, profileData: any): 
         });
       if (error) throw error;
     } catch (e: any) {
-      console.warn("[UserService] Failed to save user profile to Supabase (using local storage fallback):", e.message || e);
+      logDatabaseError("[UserService] Failed to save user profile to Supabase", e);
     }
   }
 }
@@ -312,7 +330,7 @@ export async function getUserIntegrations(userId: string | null): Promise<any[]>
         return data;
       }
     } catch (e) {
-      console.error("[UserService] Failed to load integrations:", e);
+      logDatabaseError("[UserService] Failed to load integrations", e);
     }
   }
   
@@ -369,7 +387,7 @@ export async function saveUserIntegration(
         });
       if (error) throw error;
     } catch (e: any) {
-      console.warn("[UserService] Failed to upsert user integration to Supabase (using local storage fallback):", e.message || e);
+      logDatabaseError("[UserService] Failed to upsert user integration to Supabase", e);
     }
   }
 }
@@ -386,7 +404,7 @@ export async function getSavedTemplates(userId: string | null): Promise<any[]> {
         return data;
       }
     } catch (e) {
-      console.error("[UserService] Failed to fetch saved templates:", e);
+      logDatabaseError("[UserService] Failed to fetch saved templates", e);
     }
   }
   return [];
@@ -407,7 +425,7 @@ export async function saveTemplate(
         });
       if (error) throw error;
     } catch (e) {
-      console.error("[UserService] Failed to save template:", e);
+      logDatabaseError("[UserService] Failed to save template", e);
       throw e;
     }
   }
